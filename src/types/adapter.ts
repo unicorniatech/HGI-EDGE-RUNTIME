@@ -152,7 +152,7 @@ export type Precision = 'fp32' | 'fp16' | 'bf16' | 'int8' | 'int4' | 'q4_0' | 'q
 /**
  * Hardware targets supported by adapter.
  */
-export type HardwareTarget = 'cpu' | 'cuda' | 'rocm' | 'metal' | 'opencl' | 'directml' | 'coreml' | 'npu';
+export type HardwareTarget = 'cpu' | 'cuda' | 'rocm' | 'metal' | 'opencl' | 'directml' | 'coreml' | 'npu' | 'vulkan';
 
 /**
  * Adapter capability advertisement.

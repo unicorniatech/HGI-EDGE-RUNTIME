@@ -7,9 +7,11 @@
   "scripts": {
     "build": "tsc",
     "test": "jest",
-    "lint": "eslint src tests examples --ext .ts",
-    "lint:fix": "eslint src tests examples --ext .ts --fix",
-    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \"examples/**/*.ts\"",
+    "test:llama": "jest adapters/llama_cpp",
+    "example:llama": "npx ts-node examples/llama-cpp-basic.ts",
+    "lint": "eslint src tests examples adapters --ext .ts",
+    "lint:fix": "eslint src tests examples adapters --ext .ts --fix",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \"examples/**/*.ts\" \"adapters/**/*.ts\"",
     "typecheck": "tsc --noEmit",
     "clean": "rimraf dist"
   },
@@ -43,5 +45,8 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/unicorniatech/HGI-EDGE-RUNTIME.git"
+  },
+  "dependencies": {
+    "node-llama-cpp": "^3.18.1"
   }
 }
