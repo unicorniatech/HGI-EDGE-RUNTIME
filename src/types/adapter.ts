@@ -1,9 +1,12 @@
 /**
  * HGI Edge Runtime - Adapter Type Definitions
- * 
+ *
  * Core interfaces for adapter-based inference architecture.
  * Backend-agnostic. Implementation-specific details belong in adapters.
  */
+
+// Re-export handoff types for backward compatibility
+export type { HandoffSignal, HandoffHandler } from './handoff.js';
 
 // ============================================================================
 // Token Streaming Types
@@ -118,27 +121,7 @@ export type HandoffReason =
   | 'queued'        // Local queue full
   | 'error';        // Unrecoverable error
 
-/**
- * Handoff signal raised when local execution cannot proceed.
- */
-export interface HandoffSignal {
-  /** Why handoff is requested */
-  reason: HandoffReason;
-  /** Human-readable explanation */
-  message: string;
-  /** Original request that triggered handoff */
-  originalRequest: InferenceRequest;
-  /** Whether in-progress work can be checkpointed */
-  canCheckpoint: boolean;
-  /** Optional checkpoint data if canCheckpoint=true */
-  checkpointData?: unknown;
-}
-
-/**
- * Handler for handoff signals.
- * Implemented by application layer, not runtime.
- */
-export type HandoffHandler = (signal: HandoffSignal) => void | Promise<void>;
+// Handoff types now imported from handoff.ts for comprehensive signal support
 
 // ============================================================================
 // Adapter Capability Types

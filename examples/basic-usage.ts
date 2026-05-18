@@ -13,7 +13,7 @@ async function basicExample() {
     defaultTimeoutMs: 60000,
     maxMemoryBytes: 4 * 1024 * 1024 * 1024, // 4GB
     onHandoff: (signal: HandoffSignal) => {
-      console.log('Handoff requested:', signal.reason, signal.message);
+      console.log('Handoff requested:', signal.type, signal.reason);
       // Application would handle handoff to HGI-LOCAL-HUB here
     },
   });
