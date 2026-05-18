@@ -2,19 +2,11 @@
  * HGI Edge Runtime - Llama.cpp Adapter
  *
  * Implementation using node-llama-cpp for GGUF model inference.
+ * Uses dynamic imports for ESM compatibility.
  *
  * @module adapters/llama_cpp/adapter
  */
 
-import {
-  getLlama,
-  LlamaChatSession,
-} from 'node-llama-cpp';
-import type {
-  LlamaModel,
-  LlamaContext,
-  LlamaModelOptions,
-} from 'node-llama-cpp';
 import type {
   IAdapter,
   InferenceRequest,
@@ -24,6 +16,12 @@ import type {
   AdapterStatus,
   TokenChunk,
 } from '../../src/types/index.js';
+
+// Type definitions for node-llama-cpp (loaded dynamically)
+type LlamaModel = any;
+type LlamaContext = any;
+type LlamaChatSession = any;
+type Llama = any;
 
 /**
  * Configuration options for LlamaCppAdapter
@@ -104,10 +102,13 @@ export class LlamaCppAdapter implements IAdapter {
     const mergedConfig = { ...this._config, ...options };
 
     try {
-      // Get llama instance and load model
-      const llama = await getLlama();
+      // Dynamic import of ESM-only node-llama-cpp
+      const { getLlama } = await import('node-llama-cpp');
 
-      const modelOptions: LlamaModelOptions = {
+      // Get llama instance and load model
+      const llama: Llama = await getLlama();
+
+      const modelOptions = {
         modelPath,
         gpuLayers: mergedConfig.gpuLayers ?? 0,
       };
@@ -145,8 +146,11 @@ export class LlamaCppAdapter implements IAdapter {
     const temperature = request.parameters?.temperature ?? this._config.temperature ?? 0.7;
 
     try {
+      // Dynamic import for ESM compatibility
+      const nlc = await import('node-llama-cpp');
+
       // Create a new session for this inference
-      this._session = new LlamaChatSession({
+      this._session = new nlc.LlamaChatSession({
         contextSequence: this._context!.getSequence(),
       });
 
@@ -206,6 +210,9 @@ export class LlamaCppAdapter implements IAdapter {
     const temperature = request.parameters?.temperature ?? this._config.temperature ?? 0.7;
 
     try {
+      // Dynamic import for ESM compatibility
+      const { LlamaChatSession } = await import('node-llama-cpp');
+
       // Create a new session for this inference
       this._session = new LlamaChatSession({
         contextSequence: this._context!.getSequence(),
@@ -219,7 +226,7 @@ export class LlamaCppAdapter implements IAdapter {
         temperature,
         topP: request.parameters?.topP ?? 0.9,
         topK: request.parameters?.topK ?? 40,
-        onToken: (token) => {
+        onToken: (token: string | { text: string }) => {
           // node-llama-cpp passes token as string or token object
           const tokenText = typeof token === 'string' ? token : String(token);
 

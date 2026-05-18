@@ -1,22 +1,17 @@
 /**
- * HGI Edge Runtime - Basic Llama.cpp Example
+ * HGI Edge Runtime - Basic Llama.cpp Example (ESM version)
  *
- * Demonstrates loading a model and running inference with the llama.cpp adapter.
- *
- * Usage:
- *   HGI_TEST_MODEL_PATH=./models/tinyllama.gguf npx ts-node examples/llama-cpp-basic.ts
+ * Run with: node examples/llama-cpp-basic.mjs
  */
 
-import { createLlamaCppAdapter } from '../adapters/llama_cpp/index.js';
-import type { InferenceRequest } from '../src/types/index.js';
+import { createLlamaCppAdapter } from '../dist/adapters/llama_cpp/index.js';
 
-async function main(): Promise<void> {
-  // Get model path from environment variable
+async function main() {
   const modelPath = process.env.HGI_TEST_MODEL_PATH;
 
   if (!modelPath) {
     console.error('Error: HGI_TEST_MODEL_PATH environment variable is required');
-    console.error('Example: HGI_TEST_MODEL_PATH=./models/model.gguf npx ts-node examples/llama-cpp-basic.ts');
+    console.error('Example: $env:HGI_TEST_MODEL_PATH="./models/model.gguf" node examples/llama-cpp-basic.mjs');
     process.exit(1);
   }
 
@@ -37,7 +32,6 @@ async function main(): Promise<void> {
   console.log();
 
   try {
-    // Load model
     console.log('Loading model:', modelPath);
     const loadStart = Date.now();
     await adapter.load(modelPath);
@@ -46,8 +40,7 @@ async function main(): Promise<void> {
     console.log('Status:', adapter.status.ready ? 'Ready' : 'Not ready');
     console.log();
 
-    // Prepare inference request
-    const request: InferenceRequest = {
+    const request = {
       model: modelPath,
       input: 'Say hello from HGI Edge Runtime in one sentence.',
       parameters: {
@@ -56,7 +49,6 @@ async function main(): Promise<void> {
       },
     };
 
-    // Non-streaming inference
     console.log('Running inference (non-streaming)...');
     console.log('Prompt:', request.input);
     console.log();
@@ -78,7 +70,6 @@ async function main(): Promise<void> {
     }
     console.log();
 
-    // Streaming inference demo
     console.log('Running inference (streaming)...');
     console.log('Prompt:', request.input);
     console.log();
@@ -89,7 +80,7 @@ async function main(): Promise<void> {
     await adapter.inferStream(request, (token) => {
       process.stdout.write(token.content);
       if (token.isFinal) {
-        console.log(); // newline after final token
+        console.log();
       }
     });
 
@@ -98,7 +89,6 @@ async function main(): Promise<void> {
     console.log('Streaming elapsed time:', streamTime, 'ms');
     console.log();
 
-    // Cleanup
     console.log('Unloading model...');
     await adapter.unload();
     console.log('Done!');
@@ -109,10 +99,7 @@ async function main(): Promise<void> {
   }
 }
 
-// Run the example
 main().catch((error) => {
   console.error('Fatal error:', error);
   process.exit(1);
 });
-
-export { main };
