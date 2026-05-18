@@ -1,0 +1,355 @@
+/**
+ * HGI Edge Runtime - HGI-LOCAL-HUB Client
+ *
+ * Client for communicating with HGI-LOCAL-HUB nodes.
+ * Implements handoff submission, health checks, and capability queries.
+ *
+ * Note: This is a forward-looking client. HGI-LOCAL-HUB endpoints
+ * may not exist yet. The client handles 404s gracefully.
+ *
+ * @module src/core/hgi-hub-client
+ */
+
+import type {
+  HGIHubClientConfig,
+  HGIHubHandoffRequest,
+  HGIHubHandoffResponse,
+  HGIHubHealth,
+  HGIHubCapabilities,
+  HGIHubErrorType,
+  HGIHubCapabilityInfo,
+} from '../types/hub-handoff.js';
+import { HGIHubError } from '../types/hub-handoff.js';
+import type { InferenceResponse } from '../types/adapter.js';
+
+/**
+ * Default configuration values
+ */
+const DEFAULT_CONFIG = {
+  baseUrl: 'http://localhost:4010',
+  timeoutMs: 30000,
+  runtimeId: 'hgi-edge-runtime',
+};
+
+/**
+ * HGI-LOCAL-HUB client
+ *
+ * Communicates with hub for handoff operations.
+ * Handles missing endpoints gracefully.
+ */
+export class HGIHubClient {
+  private _config: HGIHubClientConfig;
+  private _abortControllers: Set<AbortController> = new Set();
+
+  constructor(config: Partial<HGIHubClientConfig> = {}) {
+    this._config = {
+      baseUrl: config.baseUrl ?? process.env.HGI_LOCAL_HUB_URL ?? DEFAULT_CONFIG.baseUrl,
+      timeoutMs: config.timeoutMs ?? DEFAULT_CONFIG.timeoutMs,
+      runtimeId: config.runtimeId ?? DEFAULT_CONFIG.runtimeId,
+      deviceId: config.deviceId,
+      apiKey: config.apiKey,
+    };
+  }
+
+  /**
+   * Check hub health
+   *
+   * Endpoint: GET /health
+   */
+  async health(): Promise<HGIHubHealth> {
+    try {
+      const response = await this._fetch('/health', { method: 'GET' });
+
+      if (response.status === 404) {
+        throw new HGIHubError(
+          'Health endpoint not found (404) - HGI-LOCAL-HUB may not implement this yet',
+          'not_found',
+          404
+        );
+      }
+
+      if (!response.ok) {
+        throw new HGIHubError(
+          `Health check failed: ${response.status} ${response.statusText}`,
+          this._statusToErrorType(response.status),
+          response.status
+        );
+      }
+
+      const data = await response.json() as Record<string, unknown>;
+      return {
+        healthy: true,
+        timestamp: new Date().toISOString(),
+        ...data,
+      } as HGIHubHealth;
+    } catch (error) {
+      if (error instanceof HGIHubError) {
+        throw error;
+      }
+
+      // Network or other errors
+      throw new HGIHubError(
+        `Health check failed: ${error instanceof Error ? error.message : String(error)}`,
+        'network',
+        undefined,
+        error instanceof Error ? error : undefined
+      );
+    }
+  }
+
+  /**
+   * Query hub capabilities
+   *
+   * Endpoint: GET /capabilities
+   */
+  async capabilities(): Promise<HGIHubCapabilities> {
+    try {
+      const response = await this._fetch('/capabilities', { method: 'GET' });
+
+      if (response.status === 404) {
+        throw new HGIHubError(
+          'Capabilities endpoint not found (404) - HGI-LOCAL-HUB may not implement this yet',
+          'not_found',
+          404
+        );
+      }
+
+      if (!response.ok) {
+        throw new HGIHubError(
+          `Capabilities query failed: ${response.status} ${response.statusText}`,
+          this._statusToErrorType(response.status),
+          response.status
+        );
+      }
+
+      const data = await response.json() as Record<string, unknown>;
+      return {
+        hubId: (data.hubId as string) ?? 'unknown',
+        timestamp: new Date().toISOString(),
+        capabilities: (data.capabilities as HGIHubCapabilityInfo[]) ?? [],
+      };
+    } catch (error) {
+      if (error instanceof HGIHubError) {
+        throw error;
+      }
+
+      throw new HGIHubError(
+        `Capabilities query failed: ${error instanceof Error ? error.message : String(error)}`,
+        'network',
+        undefined,
+        error instanceof Error ? error : undefined
+      );
+    }
+  }
+
+  /**
+   * Submit handoff request to hub
+   *
+   * Endpoint: POST /handoff
+   */
+  async submitHandoff(request: HGIHubHandoffRequest): Promise<HGIHubHandoffResponse> {
+    try {
+      const response = await this._fetch('/handoff', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(request),
+      });
+
+      if (response.status === 404) {
+        throw new HGIHubError(
+          'Handoff endpoint not found (404) - HGI-LOCAL-HUB may not implement this yet',
+          'not_found',
+          404
+        );
+      }
+
+      if (response.status === 503) {
+        // Hub is available but can't accept handoff
+        const error = await response.json().catch(() => ({ message: 'Service unavailable' })) as { message: string };
+        throw new HGIHubError(
+          error.message ?? 'Hub temporarily unavailable',
+          'unavailable',
+          503
+        );
+      }
+
+      if (!response.ok) {
+        throw new HGIHubError(
+          `Handoff submission failed: ${response.status} ${response.statusText}`,
+          this._statusToErrorType(response.status),
+          response.status
+        );
+      }
+
+      const data = await response.json() as Record<string, unknown>;
+      return {
+        accepted: (data.accepted as boolean) ?? true,
+        handoffId: data.handoffId as string | undefined,
+        status: (data.status as HGIHubHandoffResponse['status']) ?? 'pending',
+        targetNodeId: data.targetNodeId as string | undefined,
+        estimatedWaitMs: data.estimatedWaitMs as number | undefined,
+        result: data.result as InferenceResponse | undefined,
+        error: data.error as HGIHubHandoffResponse['error'] | undefined,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      if (error instanceof HGIHubError) {
+        throw error;
+      }
+
+      throw new HGIHubError(
+        `Handoff submission failed: ${error instanceof Error ? error.message : String(error)}`,
+        'network',
+        undefined,
+        error instanceof Error ? error : undefined
+      );
+    }
+  }
+
+  /**
+   * Get handoff status
+   *
+   * Endpoint: GET /handoff/:id
+   */
+  async getHandoffStatus(handoffId: string): Promise<HGIHubHandoffResponse> {
+    try {
+      const response = await this._fetch(`/handoff/${encodeURIComponent(handoffId)}`, {
+        method: 'GET',
+      });
+
+      if (response.status === 404) {
+        throw new HGIHubError(
+          'Handoff status endpoint not found (404) - HGI-LOCAL-HUB may not implement this yet',
+          'not_found',
+          404
+        );
+      }
+
+      if (!response.ok) {
+        throw new HGIHubError(
+          `Status query failed: ${response.status} ${response.statusText}`,
+          this._statusToErrorType(response.status),
+          response.status
+        );
+      }
+      const data = await response.json() as Record<string, unknown>;
+      return {
+        accepted: (data.accepted as boolean) ?? true,
+        handoffId: (data.handoffId as string) ?? handoffId,
+        status: (data.status as HGIHubHandoffResponse['status']) ?? 'unknown',
+        targetNodeId: data.targetNodeId as string | undefined,
+        estimatedWaitMs: data.estimatedWaitMs as number | undefined,
+        result: data.result as InferenceResponse | undefined,
+        error: data.error as HGIHubHandoffResponse['error'] | undefined,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      if (error instanceof Error) {
+        throw error;
+      }
+
+      throw new HGIHubError(
+        `Status query failed: ${error instanceof Error ? error.message : String(error)}`,
+        'network',
+        undefined,
+        error instanceof Error ? error : undefined
+      );
+    }
+  }
+
+  /**
+   * Check if hub is reachable
+   *
+   * Returns true if health check succeeds, false otherwise
+   */
+  async isReachable(): Promise<boolean> {
+    try {
+      await this.health();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Get current configuration
+   */
+  get config(): Readonly<HGIHubClientConfig> {
+    return { ...this._config };
+  }
+
+  /**
+   * Abort all pending requests
+   */
+  abortAll(): void {
+    for (const controller of this._abortControllers) {
+      controller.abort();
+    }
+    this._abortControllers.clear();
+  }
+
+  /**
+   * Internal fetch with timeout and abort support
+   */
+  private async _fetch(
+    path: string,
+    init: RequestInit = {}
+  ): Promise<Response> {
+    const controller = new AbortController();
+    this._abortControllers.add(controller);
+
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, this._config.timeoutMs);
+
+    try {
+      const url = new URL(path, this._config.baseUrl).toString();
+      const response = await fetch(url, {
+        ...init,
+        signal: controller.signal,
+      });
+
+      return response;
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new HGIHubError(
+          `Request timed out after ${this._config.timeoutMs}ms`,
+          'timeout'
+        );
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
+      this._abortControllers.delete(controller);
+    }
+  }
+
+  /**
+   * Convert HTTP status to error type
+   */
+  private _statusToErrorType(status: number): HGIHubErrorType {
+    switch (status) {
+      case 404:
+        return 'not_found';
+      case 408:
+      case 504:
+        return 'timeout';
+      case 503:
+        return 'unavailable';
+      case 400:
+      case 422:
+        return 'invalid';
+      default:
+        return 'unknown';
+    }
+  }
+}
+
+/**
+ * Create HGI-LOCAL-HUB client
+ */
+export function createHGIHubClient(config?: Partial<HGIHubClientConfig>): HGIHubClient {
+  return new HGIHubClient(config);
+}

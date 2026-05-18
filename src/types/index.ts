@@ -5,4 +5,5 @@
  */
 
 export * from './adapter.js';
-// handoff types re-exported via adapter.js for backward compatibility
+export * from './handoff.js';
+export * from './hub-handoff.js';

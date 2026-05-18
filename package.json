@@ -11,6 +11,7 @@
     "test:llama": "jest adapters/llama_cpp",
     "example:llama": "node dist/examples/llama-cpp-basic.js",
     "example:llama:stream": "node dist/examples/llama-cpp-stream.js",
+    "example:handoff": "node dist/examples/handoff-client-demo.js",
     "lint": "eslint src tests examples adapters --ext .ts",
     "lint:fix": "eslint src tests examples adapters --ext .ts --fix",
     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \"examples/**/*.ts\" \"adapters/**/*.ts\"",
