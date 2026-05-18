@@ -57,17 +57,37 @@ Create: `adapters/llama_cpp/adapter.test.ts`
 - Test basic inference
 - Test streaming
 
-## TODO (Phase 2B)
+## TODO (Phase 2B) - COMPLETE ✓
 
-- [ ] Install `node-llama-cpp` dependency
-- [ ] Download TinyLlama test model
-- [ ] Create `adapter.ts` implementing IAdapter
-- [ ] Implement `load()` with model path
-- [ ] Implement `infer()` for basic completion
-- [ ] Implement `inferStream()` with token callback
-- [ ] Add error handling for common failures
-- [ ] Create basic test suite
-- [ ] Document any Windows-specific setup
+- [x] Install `node-llama-cpp` dependency
+- [x] Download TinyLlama test model
+- [x] Create `adapter.ts` implementing IAdapter
+- [x] Implement `load()` with model path
+- [x] Implement `infer()` for basic completion
+- [x] Implement `inferStream()` with token callback
+- [x] Add error handling for common failures
+- [x] Create basic test suite
+- [x] Document any Windows-specific setup
+
+## TODO (Phase 2C) - COMPLETE ✓
+
+- [x] Fix streaming "No sequences left" error
+  - Root cause: Context created with only 1 sequence
+  - Fix: Added `sequences: 2` to context creation
+- [x] Add session disposal after each inference
+- [x] Add comprehensive metrics:
+  - loadTimeMs
+  - timeToFirstTokenMs (streaming)
+  - memoryUsage (heap/rss)
+- [x] Create streaming example
+- [x] Update documentation with ESM notes
+
+## TODO (Phase 3) - Next
+
+- [ ] Integrate with HGI-LOCAL-HUB
+- [ ] Implement handoff signal detection
+- [ ] Add OOM/timeout handling
+- [ ] Add resource monitoring
 
 ## TODO (Phase 2C - Future)
 

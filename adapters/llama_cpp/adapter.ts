@@ -62,8 +62,8 @@ export class LlamaCppAdapter implements IAdapter {
   private _config: LlamaCppAdapterConfig;
   private _model: LlamaModel | null = null;
   private _context: LlamaContext | null = null;
-  private _session: LlamaChatSession | null = null;
   private _loadedModelPath: string | null = null;
+  private _loadTimeMs: number = 0;
 
   /**
    * Create a new LlamaCppAdapter instance
@@ -83,12 +83,23 @@ export class LlamaCppAdapter implements IAdapter {
    * Get current adapter status
    */
   get status(): AdapterStatus {
+    // Get memory usage if available
+    const memoryUsage = process.memoryUsage ? process.memoryUsage() : undefined;
+    const memoryUsed = memoryUsage ? memoryUsage.heapUsed : undefined;
+
     return {
       ready: this._model !== null && this._context !== null,
-      memoryUsed: undefined, // TODO: Add memory tracking
+      memoryUsed,
       loadedModel: this._loadedModelPath ?? undefined,
       lastError: undefined,
     };
+  }
+
+  /**
+   * Get load time in milliseconds
+   */
+  get loadTimeMs(): number {
+    return this._loadTimeMs;
   }
 
   /**
@@ -100,6 +111,8 @@ export class LlamaCppAdapter implements IAdapter {
     }
 
     const mergedConfig = { ...this._config, ...options };
+
+    const loadStart = Date.now();
 
     try {
       // Dynamic import of ESM-only node-llama-cpp
@@ -123,9 +136,11 @@ export class LlamaCppAdapter implements IAdapter {
         contextSize: mergedConfig.contextSize ?? 4096,
         batchSize: mergedConfig.batchSize ?? 512,
         threads: mergedConfig.threads,
+        sequences: 2, // Allow multiple concurrent sequences for streaming
       });
 
       this._loadedModelPath = modelPath;
+      this._loadTimeMs = Date.now() - loadStart;
     } catch (error) {
       this._model = null;
       this._context = null;
@@ -145,18 +160,20 @@ export class LlamaCppAdapter implements IAdapter {
     const maxTokens = request.parameters?.maxTokens ?? this._config.maxTokens ?? 512;
     const temperature = request.parameters?.temperature ?? this._config.temperature ?? 0.7;
 
+    let session: LlamaChatSession | null = null;
+
     try {
       // Dynamic import for ESM compatibility
       const nlc = await import('node-llama-cpp');
 
       // Create a new session for this inference
-      this._session = new nlc.LlamaChatSession({
+      session = new nlc.LlamaChatSession({
         contextSequence: this._context!.getSequence(),
       });
 
       const startTime = Date.now();
 
-      const response = await this._session.prompt(prompt, {
+      const response = await session.prompt(prompt, {
         maxTokens,
         temperature,
         topP: request.parameters?.topP ?? 0.9,
@@ -165,9 +182,15 @@ export class LlamaCppAdapter implements IAdapter {
 
       const elapsedMs = Date.now() - startTime;
 
+      // Dispose session to release sequence back to pool
+      await session.dispose();
+
       // Estimate token counts (node-llama-cpp doesn't always expose this directly)
       const promptTokens = this._estimateTokenCount(prompt);
       const completionTokens = this._estimateTokenCount(response);
+
+      // Get memory usage
+      const memoryUsage = process.memoryUsage ? process.memoryUsage() : undefined;
 
       return {
         content: response,
@@ -187,9 +210,15 @@ export class LlamaCppAdapter implements IAdapter {
           elapsedMs,
           backend: 'llama.cpp',
           modelPath: this._loadedModelPath,
+          memoryUsage,
+          loadTimeMs: this._loadTimeMs,
         },
       };
     } catch (error) {
+      // Ensure session is disposed even on error
+      if (session) {
+        await session.dispose().catch(() => { /* ignore */ });
+      }
       throw new Error(
         `Inference failed: ${error instanceof Error ? error.message : String(error)}`
       );
@@ -209,24 +238,34 @@ export class LlamaCppAdapter implements IAdapter {
     const maxTokens = request.parameters?.maxTokens ?? this._config.maxTokens ?? 512;
     const temperature = request.parameters?.temperature ?? this._config.temperature ?? 0.7;
 
+    let session: LlamaChatSession | null = null;
+    let timeToFirstTokenMs: number | undefined;
+
     try {
       // Dynamic import for ESM compatibility
-      const { LlamaChatSession } = await import('node-llama-cpp');
+      const nlc = await import('node-llama-cpp');
 
       // Create a new session for this inference
-      this._session = new LlamaChatSession({
+      session = new nlc.LlamaChatSession({
         contextSequence: this._context!.getSequence(),
       });
 
       const startTime = Date.now();
       let tokenIndex = 0;
+      let firstToken = true;
 
-      const response = await this._session.prompt(prompt, {
+      const response = await session.prompt(prompt, {
         maxTokens,
         temperature,
         topP: request.parameters?.topP ?? 0.9,
         topK: request.parameters?.topK ?? 40,
         onToken: (token: string | { text: string }) => {
+          // Track time to first token
+          if (firstToken) {
+            timeToFirstTokenMs = Date.now() - startTime;
+            firstToken = false;
+          }
+
           // node-llama-cpp passes token as string or token object
           const tokenText = typeof token === 'string' ? token : String(token);
 
@@ -242,6 +281,9 @@ export class LlamaCppAdapter implements IAdapter {
 
       const elapsedMs = Date.now() - startTime;
 
+      // Dispose session to release sequence back to pool
+      await session.dispose();
+
       // Send final token
       await callback({
         content: '',
@@ -252,6 +294,9 @@ export class LlamaCppAdapter implements IAdapter {
       // Estimate token counts
       const promptTokens = this._estimateTokenCount(prompt);
       const completionTokens = this._estimateTokenCount(response);
+
+      // Get memory usage
+      const memoryUsage = process.memoryUsage ? process.memoryUsage() : undefined;
 
       return {
         content: response,
@@ -269,11 +314,18 @@ export class LlamaCppAdapter implements IAdapter {
         },
         metadata: {
           elapsedMs,
+          timeToFirstTokenMs,
           backend: 'llama.cpp',
           modelPath: this._loadedModelPath,
+          memoryUsage,
+          loadTimeMs: this._loadTimeMs,
         },
       };
     } catch (error) {
+      // Ensure session is disposed even on error
+      if (session) {
+        await session.dispose().catch(() => { /* ignore */ });
+      }
       throw new Error(
         `Streaming inference failed: ${error instanceof Error ? error.message : String(error)}`
       );
@@ -286,9 +338,6 @@ export class LlamaCppAdapter implements IAdapter {
   async reset(): Promise<void> {
     this._ensureLoaded();
 
-    // Clear the session but keep context
-    this._session = null;
-
     // Reset context to clear KV cache
     if (this._context) {
       await this._context.dispose();
@@ -296,6 +345,7 @@ export class LlamaCppAdapter implements IAdapter {
         contextSize: this._config.contextSize ?? 4096,
         batchSize: this._config.batchSize ?? 512,
         threads: this._config.threads,
+        sequences: 2, // Allow multiple concurrent sequences
       });
     }
   }
@@ -304,8 +354,6 @@ export class LlamaCppAdapter implements IAdapter {
    * Unload the model and release all resources
    */
   async unload(): Promise<void> {
-    this._session = null;
-
     if (this._context) {
       await this._context.dispose();
       this._context = null;
@@ -317,6 +365,7 @@ export class LlamaCppAdapter implements IAdapter {
     }
 
     this._loadedModelPath = null;
+    this._loadTimeMs = 0;
   }
 
   /**

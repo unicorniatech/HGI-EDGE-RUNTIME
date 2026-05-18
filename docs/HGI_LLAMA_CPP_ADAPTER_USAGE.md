@@ -83,12 +83,17 @@ mkdir models
 ### Basic Usage
 
 ```bash
-# Set model path
-set HGI_TEST_MODEL_PATH=./models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+# Set model path (PowerShell)
+$env:HGI_TEST_MODEL_PATH="./models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
 
-# Run example
-npx ts-node examples/llama-cpp-basic.ts
+# Run basic example
+npm run example:llama
+
+# Run streaming example
+npm run example:llama:stream
 ```
+
+**Note**: Project uses ESM (`"type": "module"`). Run compiled JS from `dist/`, not TS directly.
 
 ### Expected Output
 
@@ -326,5 +331,102 @@ const adapter = createLlamaCppAdapter({
 
 ---
 
-**Document Version**: 0.1.0  
+## Streaming Example
+
+```bash
+$env:HGI_TEST_MODEL_PATH="./models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+npm run example:llama:stream
+```
+
+**Output**:
+```
+========================================
+HGI Edge Runtime - Llama.cpp Streaming
+========================================
+
+Backend: Llama.cpp (node-llama-cpp)
+Version: 3.18.1
+
+Loading model: ./models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+Model loaded in 1952ms
+Status: Ready
+Memory used: 18 MB
+
+Running streaming inference...
+Prompt: Say hello from HGI Edge Runtime in one sentence.
+
+Response:
+---------
+HGI Edge Runtime greets you.
+---------
+
+Statistics:
+  Time to first token: 544ms
+  Total streaming time: 2197 ms
+  Backend: llama.cpp
+  Tokens (total): 19
+  Time to first token (reported): 280 ms
+  Model load time: 1952 ms
+  Memory (heap): 27 MB
+  Memory (RSS): 904 MB
+```
+
+## Metrics Available
+
+| Metric | Description | Availability |
+|--------|-------------|--------------|
+| `loadTimeMs` | Model loading time | Always |
+| `elapsedMs` | Total inference time | Always |
+| `timeToFirstTokenMs` | Time until first token | Streaming only |
+| `promptTokens` | Estimated prompt tokens | Always |
+| `completionTokens` | Estimated completion tokens | Always |
+| `memoryUsage` | Node.js heap/rss | Always |
+
+## Windows ESM Notes
+
+This project uses ES Modules (`"type": "module"`) for compatibility with `node-llama-cpp`.
+
+**Running examples**:
+```powershell
+# Build first
+npm run build
+
+# Run compiled JS (not TS)
+$env:HGI_TEST_MODEL_PATH="./models/model.gguf"
+node dist/examples/llama-cpp-basic.js
+```
+
+**Common issues**:
+- Use `node dist/...` not `npx ts-node` (ESM compatibility)
+- Set env vars with `$env:` in PowerShell
+- Use forward slashes in paths
+
+## Known Limitations
+
+1. **Token display in streaming**: May show token IDs during streaming, but final text is correct
+2. **Estimated token counts**: Uses 4 chars/token approximation, not exact tokenizer
+3. **No grammar support**: JSON schema validation not yet implemented
+4. **No embeddings**: Text embeddings not supported in this phase
+5. **Session per inference**: Each call creates/disposes session (proper cleanup)
+
+## Exact Commands Used Successfully
+
+```powershell
+# 1. Build
+npm run build
+
+# 2. Basic inference
+$env:HGI_TEST_MODEL_PATH="./models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+node dist/examples/llama-cpp-basic.js
+
+# 3. Streaming inference
+$env:HGI_TEST_MODEL_PATH="./models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+node dist/examples/llama-cpp-stream.js
+
+# 4. Tests
+$env:NODE_OPTIONS="--experimental-vm-modules"
+npm test
+```
+
+**Document Version**: 0.2.0  
 **Last Updated**: 2026-05-18
