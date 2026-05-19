@@ -202,6 +202,9 @@ describe('Worker Pool - Hardened Tests', () => {
       const selected = pool.getLeastLoadedWorker('llm');
       expect(selected).not.toBeNull();
       expect(selected!.id).toBe('worker-02');
+
+      // Complete the active job so pool.stop() doesn't hang
+      pool.recordJobComplete(worker1, 'handoff-001', 1000);
     });
 
     test('selects worker by capability', async () => {
