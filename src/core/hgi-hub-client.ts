@@ -285,8 +285,14 @@ export class HGIHubClient {
         );
       }
 
-      const data = await response.json() as { handoffs?: Array<{ id: string; status: string; requestedCapability: string; createdAt: string }> };
-      return data.handoffs ?? [];
+      const data = await response.json() as { queue?: Array<{ handoffId: string; status?: string; requestedCapability?: string; queuedAt: string }> };
+      // Map hub's queue format to our format
+      return (data.queue ?? []).map(item => ({
+        id: item.handoffId,
+        status: item.status ?? 'queued', // Default to queued since they're in the queue
+        requestedCapability: item.requestedCapability ?? 'llm',
+        createdAt: item.queuedAt,
+      }));
     } catch (error) {
       if (error instanceof HGIHubError) {
         throw error;
