@@ -1,8 +1,15 @@
 # HGI Local Llama Handoff Worker
 
-**Phase**: 4B - Worker Node Implementation  
-**Status**: Active Development  
+**Phase**: 4C - Hardened Worker Runtime  
+**Status**: Production-Ready  
 **Date**: 2026-05-18
+
+**Features**:
+- Worker heartbeat and stats logging
+- Graceful shutdown (SIGINT/SIGTERM)
+- Inference timeout protection
+- Max jobs limit
+- Calm idle behavior
 
 ---
 
@@ -83,6 +90,9 @@ Worker Pattern:
 | `HGI_WORKER_ID` | `worker-llama-local-dev` | Worker identifier |
 | `HGI_WORKER_POLL_MS` | `3000` | Queue poll interval (ms) |
 | `HGI_WORKER_ONCE` | `false` | Process one handoff and exit |
+| `HGI_WORKER_MAX_JOBS` | *unlimited* | Max jobs before exit |
+| `HGI_WORKER_INFERENCE_TIMEOUT_MS` | `60000` | Inference timeout (ms) |
+| `HGI_WORKER_IDLE_LOG_INTERVAL` | `10` | Log idle status every N polls |
 
 ### Run Worker (Continuous Mode)
 
@@ -105,6 +115,94 @@ $env:HGI_TEST_MODEL_PATH="./models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
 $env:HGI_WORKER_ONCE="true"
 npm run worker:llama
 ```
+
+### Run Worker (Max Jobs Mode)
+
+Process exactly N jobs then exit:
+
+```bash
+# PowerShell
+$env:HGI_LOCAL_HUB_URL="http://localhost:4010"
+$env:HGI_TEST_MODEL_PATH="./models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+$env:HGI_WORKER_MAX_JOBS="5"
+npm run worker:llama
+```
+
+### Run Worker (With Timeout Protection)
+
+```bash
+# PowerShell
+$env:HGI_LOCAL_HUB_URL="http://localhost:4010"
+$env:HGI_TEST_MODEL_PATH="./models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+$env:HGI_WORKER_INFERENCE_TIMEOUT_MS="30000"
+$env:HGI_WORKER_MAX_JOBS="1"
+npm run worker:llama
+```
+
+---
+
+## Worker Features
+
+### Heartbeat and Stats
+
+The worker logs periodic heartbeats showing:
+- Worker ID and uptime
+- Model loaded
+- Jobs processed/failed
+- Memory usage (heap/rss)
+- Last poll and completion timestamps
+
+Example heartbeat:
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Worker Heartbeat
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Worker ID:      worker-llama-local-dev
+  Uptime:         5m 30s
+  Model loaded:   tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+  Processed:      12
+  Failed:         0
+  Memory:         512MB heap / 1024MB rss
+  Last poll:      2026-05-18T12:00:00.000Z
+  Last completed: 2026-05-18T11:59:45.000Z
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+### Graceful Shutdown
+
+The worker handles shutdown signals gracefully:
+
+- **SIGINT** (Ctrl+C): Initiates graceful shutdown
+- **SIGTERM**: Initiates graceful shutdown
+- **Double signal**: Force immediate exit
+
+During graceful shutdown:
+1. Stop accepting new handoffs
+2. Complete current inference (if any)
+3. Print session summary
+4. Unload model
+5. Exit cleanly
+
+### Idle Behavior
+
+When the queue is empty, the worker:
+- Continues polling every 3 seconds (configurable)
+- Logs calm status every N polls (default: 10)
+- Does not crash or exit (unless in once mode)
+- Shows memory usage in idle logs
+
+Example idle log:
+```
+[2026-05-18T12:00:00.000Z] Idle... uptime: 5m 30s, polls: 10, processed: 0, memory: 1024MB
+```
+
+### Inference Timeout
+
+If inference exceeds the timeout:
+1. Inference is aborted
+2. Handoff is marked as failed
+3. Error code: `INFERENCE_TIMEOUT`
+4. Worker continues (unless in once mode)
 
 ---
 
@@ -195,18 +293,21 @@ curl http://localhost:4010/handoff/{handoffId}
 | Handoff claiming | ✓ Working | With conflict detection |
 | Inference | ✓ Working | llama.cpp adapter |
 | Result completion | ✓ Working | Returns generated text |
+| Worker heartbeats | ✓ Working | Logs stats periodically |
+| Graceful shutdown | ✓ Working | SIGINT/SIGTERM handling |
+| Max jobs limit | ✓ Working | Configurable exit threshold |
+| Inference timeout | ✓ Working | Protects against hangs |
+| Calm idle logging | ✓ Working | Reduces log spam |
 | Multiple workers | ⚠ Basic | No load balancing yet |
-| Worker heartbeats | ✗ Not implemented | Would improve reliability |
 | Auto-retry | ✗ Not implemented | Manual retry on failure |
 | GPU support | ⚠ Depends on model | llama.cpp handles this |
+| Worker pool | ✗ Not implemented | Single worker only |
 
 ### Known Issues
 
 1. **Prompt extraction**: Currently parses `originalRequest` from handoff. If format changes, extraction may fail (falls back to default "Hello").
 
 2. **Model reloading**: Worker keeps model loaded. If model file changes, worker must restart.
-
-3. **No graceful shutdown**: SIGINT handling is basic. In-flight handoffs may be lost.
 
 ---
 
