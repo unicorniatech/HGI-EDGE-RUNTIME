@@ -13,6 +13,7 @@
     "example:llama:stream": "node dist/examples/llama-cpp-stream.js",
     "example:handoff": "node dist/examples/handoff-client-demo.js",
     "example:e2e": "node dist/examples/end-to-end-handoff.js",
+    "example:claimable": "node dist/examples/claimable-worker-demo.js",
     "worker:llama": "node dist/examples/llama-handoff-worker.js",
     "lint": "eslint src tests examples adapters --ext .ts",
     "lint:fix": "eslint src tests examples adapters --ext .ts --fix",

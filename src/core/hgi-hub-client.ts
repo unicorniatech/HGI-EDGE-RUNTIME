@@ -307,6 +307,76 @@ export class HGIHubClient {
   }
 
   /**
+   * Get claimable handoffs for this worker (intelligent selection)
+   *
+   * Endpoint: GET /handoff/claimable?workerId=...
+   * Returns handoffs that are compatible with this worker's capabilities,
+   * ordered by priority (highest first).
+   */
+  async getClaimableHandoffs(workerId: string): Promise<Array<{
+    id: string;
+    status: string;
+    requestedCapability: string;
+    createdAt: string;
+    priority?: number;
+    estimatedComplexity?: string;
+  }>> {
+    try {
+      const response = await this._fetch(`/handoff/claimable?workerId=${encodeURIComponent(workerId)}`, { method: 'GET' });
+
+      if (response.status === 404) {
+        throw new HGIHubError(
+          'Claimable endpoint not found (404) - HGI-LOCAL-HUB may not implement this yet',
+          'not_found',
+          404
+        );
+      }
+
+      if (!response.ok) {
+        throw new HGIHubError(
+          `Claimable query failed: ${response.status} ${response.statusText}`,
+          this._statusToErrorType(response.status),
+          response.status
+        );
+      }
+
+      const data = await response.json() as {
+        claimable?: Array<{
+          handoffId: string;
+          status?: string;
+          requestedCapability?: string;
+          queuedAt: string;
+          priority?: number;
+          estimatedComplexity?: string;
+        }>;
+        workerId?: string;
+        workerCapabilities?: string[];
+        count?: number;
+      };
+
+      // Map hub's claimable format to our format
+      return (data.claimable ?? []).map(item => ({
+        id: item.handoffId,
+        status: item.status ?? 'queued',
+        requestedCapability: item.requestedCapability ?? 'llm',
+        createdAt: item.queuedAt,
+        priority: item.priority,
+        estimatedComplexity: item.estimatedComplexity,
+      }));
+    } catch (error) {
+      if (error instanceof HGIHubError) {
+        throw error;
+      }
+      throw new HGIHubError(
+        `Claimable query failed: ${error instanceof Error ? error.message : String(error)}`,
+        'network',
+        undefined,
+        error instanceof Error ? error : undefined
+      );
+    }
+  }
+
+  /**
    * Claim a handoff for processing
    *
    * Endpoint: POST /handoff/:id/claim

@@ -293,6 +293,9 @@ async function main(): Promise<void> {
   console.log('─────────────────────────────────────────────────────────────');
   console.log();
 
+  // Worker capabilities (for logging and hub matching)
+  const workerCapabilities = ['llm', 'local-llm', 'tinyllama'];
+
   // Main worker loop
   while (running) {
     // Check if max jobs reached
@@ -308,12 +311,26 @@ async function main(): Promise<void> {
     }
 
     try {
-      // Poll queue
+      // Query claimable handoffs (intelligent hub selection)
       stats.lastPollAt = Date.now();
-      const queue = await hubClient.listHandoffQueue();
-      const pending = queue.filter(h => h.status === 'queued');
+      let claimable: Awaited<ReturnType<typeof hubClient.getClaimableHandoffs>> = [];
+      let usingClaimableEndpoint = true;
 
-      if (pending.length === 0) {
+      try {
+        claimable = await hubClient.getClaimableHandoffs(WORKER_ID);
+      } catch (error) {
+        // Fallback to queue endpoint if claimable not available
+        if (error instanceof HGIHubError && error.type === 'not_found') {
+          console.log('⚠ Claimable endpoint not available, falling back to queue endpoint');
+          usingClaimableEndpoint = false;
+          const queue = await hubClient.listHandoffQueue();
+          claimable = queue.filter(h => h.status === 'queued');
+        } else {
+          throw error;
+        }
+      }
+
+      if (claimable.length === 0) {
         // Idle behavior
         logIdleStatus();
 
@@ -330,10 +347,28 @@ async function main(): Promise<void> {
       stats.idlePollCount = 0;
 
       console.log();
-      console.log(`Found ${pending.length} queued handoff(s)`);
+      console.log('━'.repeat(60));
+      if (usingClaimableEndpoint) {
+        console.log('Claimable Handoffs Available (Intelligent Hub Selection)');
+      } else {
+        console.log('Queue Handoffs Available (Fallback Mode)');
+      }
+      console.log('━'.repeat(60));
+      console.log(`  Worker ID:          ${WORKER_ID}`);
+      console.log(`  Worker capabilities: ${workerCapabilities.join(', ')}`);
+      console.log(`  Available count:     ${claimable.length}`);
 
-      // Take first available handoff
-      const handoff = pending[0];
+      // Take first claimable handoff (highest priority per hub)
+      const handoff = claimable[0];
+      console.log(`  Selected handoff:`);
+      console.log(`    ID:           ${handoff.id}`);
+      if (usingClaimableEndpoint) {
+        console.log(`    Priority:     ${handoff.priority ?? 'default'}`);
+        console.log(`    Capability:   ${handoff.requestedCapability}`);
+        console.log(`    Complexity:   ${handoff.estimatedComplexity ?? 'unknown'}`);
+      }
+      console.log('━'.repeat(60));
+
       console.log(`Claiming handoff: ${handoff.id}`);
 
       // Claim handoff
