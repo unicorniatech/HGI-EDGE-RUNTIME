@@ -163,9 +163,21 @@ export class HandoffRuntime {
       createdAt: timestamp,
     };
 
+    // Serialize complex objects for hub compatibility
+    // The hub expects handoffSignal, localModel, originalRequest as JSON strings
+    // metrics should remain as an object
+    const serializedRequest = {
+      ...handoffRequest,
+      handoffSignal: JSON.stringify(handoffRequest.handoffSignal),
+      localModel: JSON.stringify(handoffRequest.localModel),
+      originalRequest: JSON.stringify(handoffRequest.originalRequest),
+      localResponse: handoffRequest.localResponse ? JSON.stringify(handoffRequest.localResponse) : undefined,
+    };
+
     // Submit to hub
     try {
-      const hubResponse = await this._hubClient.submitHandoff(handoffRequest);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const hubResponse = await this._hubClient.submitHandoff(serializedRequest as any);
 
       return {
         success: hubResponse.accepted,

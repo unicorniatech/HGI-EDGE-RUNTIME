@@ -162,6 +162,22 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Force handoff if HGI_FORCE_HANDOFF is set (for testing)
+  const forceHandoff = process.env.HGI_FORCE_HANDOFF === 'true';
+  if (forceHandoff) {
+    console.log('⚠ HGI_FORCE_HANDOFF=true - Forcing handoff with synthetic metrics');
+    localMetrics = {
+      timestamp: new Date().toISOString(),
+      heapUsed: 1_500_000_000, // 1.5GB - above threshold
+      rss: 2_500_000_000, // 2.5GB - above threshold
+      inferenceTimeMs: 45000, // 45s - above threshold
+      promptTokens: 5000, // Above 4K threshold
+      completionTokens: localMetrics.completionTokens,
+      tokensPerSecond: 0.5, // Below 1 TPS threshold
+      modelSizeBytes: 5_000_000_000, // 5GB - above threshold
+    };
+  }
+
   console.log('Local Metrics:');
   console.log(`  Heap Used: ${((localMetrics.heapUsed ?? 0) / 1024 / 1024).toFixed(1)} MB`);
   console.log(`  RSS: ${((localMetrics.rss ?? 0) / 1024 / 1024).toFixed(1)} MB`);
