@@ -4,6 +4,12 @@
  * Validates multi-worker execution against a running hgi-local-node hub.
  * Tests the full handoff lifecycle: create → claimable → claim → process → complete.
  *
+ * Phase 5C-F: Aligned with hub claimable contract including:
+ * - Worker heartbeat (prevents 30s staleness)
+ * - Exact capability matching (includes "generic")
+ * - Required capability in handoffs
+ * - Debug endpoint for troubleshooting
+ *
  * Worker Types Tested:
  * - llm: Text generation
  * - eva: Reasoning/analysis
@@ -18,12 +24,8 @@
 import { createHGIHubClient } from '../src/core/hgi-hub-client.js';
 import { createWorkerPool } from '../src/core/worker-pool.js';
 import {
-  createLLMWorker,
-  createEVAWorker,
-  createSTTWorker,
-  createTTSWorker,
-  createVisionWorker,
-  createEmergencyWorker,
+  buildWorkerContract,
+  type WorkerCapabilityContract,
 } from '../src/core/worker-registration.js';
 import {
   createProcessor,
@@ -104,9 +106,9 @@ async function main(): Promise<void> {
   }
   console.log();
 
-  // Step 3: Create worker pool with capability contracts
+  // Step 3: Create worker pool with aligned capability contracts
   console.log('━'.repeat(60));
-  console.log('Step 3: Register Workers with Capability Contracts');
+  console.log('Step 3: Register Workers with Aligned Capability Contracts');
   console.log('━'.repeat(60));
   console.log();
 
@@ -117,27 +119,94 @@ async function main(): Promise<void> {
     enableLoadBalancing: true,
   });
 
-  // Register workers
-  const workers = [
-    createLLMWorker('llm-01', hubClient, { maxConcurrentJobs: 2 }),
-    createEVAWorker('eva-01', hubClient, { maxConcurrentJobs: 1 }),
-    createSTTWorker('stt-01', hubClient, { maxConcurrentJobs: 2 }),
-    createTTSWorker('tts-01', hubClient, { maxConcurrentJobs: 2 }),
-    createVisionWorker('vision-01', hubClient, { maxConcurrentJobs: 1 }),
-    createEmergencyWorker('emergency-01', hubClient, { maxConcurrentJobs: 3 }),
+  // Create aligned worker contracts with hub-compatible capabilities
+  // All workers MUST include "generic" and exact capability strings the hub expects
+  const workerContracts: WorkerCapabilityContract[] = [
+    buildWorkerContract({
+      workerId: 'llm-01',
+      workerType: 'llm',
+      capabilities: ['generic', 'llm', 'text-generation'],
+      maxConcurrentJobs: 2,
+    }),
+    buildWorkerContract({
+      workerId: 'eva-01',
+      workerType: 'eva',
+      capabilities: ['generic', 'eva', 'reasoning', 'analysis'],
+      maxConcurrentJobs: 1,
+    }),
+    buildWorkerContract({
+      workerId: 'stt-01',
+      workerType: 'stt',
+      capabilities: ['generic', 'stt', 'speech-to-text', 'audio-transcription'],
+      maxConcurrentJobs: 2,
+    }),
+    buildWorkerContract({
+      workerId: 'tts-01',
+      workerType: 'tts',
+      capabilities: ['generic', 'tts', 'text-to-speech', 'speech-synthesis'],
+      maxConcurrentJobs: 2,
+    }),
+    buildWorkerContract({
+      workerId: 'vision-01',
+      workerType: 'vision',
+      capabilities: ['generic', 'vision', 'image-analysis'],
+      maxConcurrentJobs: 1,
+    }),
+    buildWorkerContract({
+      workerId: 'emergency-01',
+      workerType: 'emergency',
+      capabilities: ['generic', 'emergency', 'priority-inference', 'redvecinal-emergency'],
+      maxConcurrentJobs: 3,
+    }),
   ];
 
-  for (const worker of workers) {
-    pool.addWorkerWithContract(worker.contract, hubClient);
-    console.log(`✓ Registered: ${worker.contract.id}`);
-    console.log(`  Type: ${worker.contract.workerType}`);
-    console.log(`  Capabilities: ${worker.contract.capabilities.join(', ')}`);
-    console.log(`  Max Jobs: ${worker.contract.maxConcurrentJobs}`);
+  for (const contract of workerContracts) {
+    pool.addWorkerWithContract(contract, hubClient);
+    console.log(`✓ Registered: ${contract.id}`);
+    console.log(`  Type: ${contract.workerType}`);
+    console.log(`  Capabilities: ${contract.capabilities.join(', ')}`);
+    console.log(`  Max Jobs: ${contract.maxConcurrentJobs}`);
     console.log();
   }
 
   await pool.start();
-  console.log(`Pool started with ${workers.length} workers`);
+  console.log(`Pool started with ${workerContracts.length} workers`);
+  console.log();
+
+  // Step 3b: Start worker heartbeat loop
+  console.log('━'.repeat(60));
+  console.log('Step 3b: Start Worker Heartbeat Loop');
+  console.log('━'.repeat(60));
+  console.log();
+
+  // Send immediate heartbeat to register workers as fresh
+  console.log('Sending initial heartbeats...');
+  for (const contract of workerContracts) {
+    try {
+      await hubClient.sendWorkerHeartbeat(contract.id, 'online');
+      console.log(`  ✓ Heartbeat sent: ${contract.id}`);
+    } catch (error) {
+      console.log(`  ⚠ Heartbeat failed for ${contract.id}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  console.log();
+
+  // Start heartbeat interval (every 10 seconds)
+  const HEARTBEAT_INTERVAL_MS = 10000;
+  let heartbeatRunning = true;
+  const heartbeatInterval = setInterval(async () => {
+    if (!heartbeatRunning) return;
+    for (const contract of workerContracts) {
+      try {
+        await hubClient.sendWorkerHeartbeat(contract.id, 'online');
+      } catch {
+        // Silently fail - hub may not support heartbeat
+      }
+    }
+  }, HEARTBEAT_INTERVAL_MS);
+
+  console.log(`✓ Heartbeat loop started (${HEARTBEAT_INTERVAL_MS}ms interval)`);
+  console.log('  Workers will remain fresh (30s timeout prevented)');
   console.log();
 
   // Step 4: Submit mixed handoffs to hub
@@ -146,19 +215,28 @@ async function main(): Promise<void> {
   console.log('━'.repeat(60));
   console.log();
 
+  // Map priority levels to numeric values for hub
+  const priorityMap: Record<string, number> = {
+    'emergency': 100,
+    'high': 75,
+    'normal': 50,
+    'low': 25,
+  };
+
   const testHandoffs: Array<{
     capability: string;
     input: string;
     priority: 'low' | 'normal' | 'high' | 'emergency';
+    priorityValue: number;
   }> = [
-    { capability: 'llm', input: 'Explain quantum computing basics', priority: 'normal' },
-    { capability: 'eva', input: 'Analyze this business strategy', priority: 'high' },
-    { capability: 'stt', input: 'audio-meeting-recording.wav', priority: 'normal' },
-    { capability: 'tts', input: 'Welcome to the automated assistant', priority: 'normal' },
-    { capability: 'vision', input: 'image-traffic-accident.jpg', priority: 'high' },
-    { capability: 'emergency', input: 'Medical emergency at GPS coordinates...', priority: 'emergency' },
-    { capability: 'llm', input: 'Write a Python function to sort a list', priority: 'normal' },
-    { capability: 'text-generation', input: 'Generate product description', priority: 'normal' },
+    { capability: 'llm', input: 'Explain quantum computing basics', priority: 'normal', priorityValue: priorityMap['normal'] },
+    { capability: 'eva', input: 'Analyze this business strategy', priority: 'high', priorityValue: priorityMap['high'] },
+    { capability: 'stt', input: 'audio-meeting-recording.wav', priority: 'normal', priorityValue: priorityMap['normal'] },
+    { capability: 'tts', input: 'Welcome to the automated assistant', priority: 'normal', priorityValue: priorityMap['normal'] },
+    { capability: 'vision', input: 'image-traffic-accident.jpg', priority: 'high', priorityValue: priorityMap['high'] },
+    { capability: 'emergency', input: 'Medical emergency at GPS coordinates...', priority: 'emergency', priorityValue: priorityMap['emergency'] },
+    { capability: 'llm', input: 'Write a Python function to sort a list', priority: 'normal', priorityValue: priorityMap['normal'] },
+    { capability: 'text-generation', input: 'Generate product description', priority: 'normal', priorityValue: priorityMap['normal'] },
   ];
 
   const createdHandoffs: HGIHubHandoffResponse[] = [];
@@ -185,6 +263,7 @@ async function main(): Promise<void> {
         metrics: { timestamp: now },
         requestedCapability: handoff.capability as 'llm' | 'stt' | 'embedding' | 'rag' | 'vision' | 'tts',
         createdAt: now,
+        priority: handoff.priorityValue, // Include priority for hub
       });
 
       createdHandoffs.push(created);
@@ -241,6 +320,29 @@ async function main(): Promise<void> {
       }
 
       console.log(`  Found ${claimable.length} claimable handoffs`);
+
+      // If claimable is empty, use debug endpoint to diagnose
+      if (claimable.length === 0 && claimableEndpointAvailable) {
+        try {
+          const debugInfo = await hubClient.getClaimableDebug(worker.id);
+          console.log(`  📊 Debug info for ${worker.id}:`);
+          console.log(`     Worker status: ${debugInfo.workerStatus ?? 'unknown'}`);
+          console.log(`     Worker capabilities: ${debugInfo.workerCapabilities?.join(', ') ?? 'unknown'}`);
+          console.log(`     Total handoffs in queue: ${debugInfo.totalHandoffs ?? 'unknown'}`);
+          console.log(`     Matching handoffs: ${debugInfo.matchingHandoffs ?? 'unknown'}`);
+          if (debugInfo.rejections && debugInfo.rejections.length > 0) {
+            console.log(`     Rejection reasons:`);
+            for (const rejection of debugInfo.rejections.slice(0, 3)) {
+              console.log(`       - ${rejection.handoffId}: ${rejection.reason}`);
+            }
+          }
+          if (debugInfo.message) {
+            console.log(`     Message: ${debugInfo.message}`);
+          }
+        } catch (debugError) {
+          console.log(`  ⚠ Debug endpoint not available: ${debugError instanceof Error ? debugError.message : String(debugError)}`);
+        }
+      }
 
       // Process compatible handoffs
       for (const handoff of claimable) {
@@ -415,6 +517,11 @@ async function main(): Promise<void> {
   console.log();
 
   // Cleanup
+  // Stop heartbeat loop
+  heartbeatRunning = false;
+  clearInterval(heartbeatInterval);
+  console.log('Heartbeat stopped.');
+
   await pool.stop();
   console.log('Pool stopped.');
 

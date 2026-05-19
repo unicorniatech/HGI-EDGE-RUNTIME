@@ -173,8 +173,17 @@ export class HGIHubClient {
     if (request.requestedCapability) {
       payload.requiredCapability = request.requestedCapability;
     }
+    // Map numeric priority to string as hub expects: 'low' | 'normal' | 'high'
     if (request.priority !== undefined) {
-      payload.priority = request.priority;
+      if (request.priority >= 100) {
+        payload.priority = 'emergency';
+      } else if (request.priority >= 75) {
+        payload.priority = 'high';
+      } else if (request.priority >= 50) {
+        payload.priority = 'normal';
+      } else {
+        payload.priority = 'low';
+      }
     }
 
     return payload;
@@ -614,6 +623,111 @@ export class HGIHubClient {
         'network',
         undefined,
         err instanceof Error ? err : undefined
+      );
+    }
+  }
+
+  /**
+   * Send worker heartbeat to keep worker fresh
+   *
+   * Endpoint: POST /workers/heartbeat
+   *
+   * Workers become stale after 30 seconds without heartbeat.
+   * Stale workers are excluded from claimable queries.
+   */
+  async sendWorkerHeartbeat(workerId: string, status: 'online' | 'busy' | 'offline' = 'online'): Promise<boolean> {
+    try {
+      const response = await this._fetch('/workers/heartbeat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ workerId, status }),
+      });
+
+      if (response.status === 404) {
+        // Heartbeat endpoint not available - this is okay for older hubs
+        console.warn('⚠️ Worker heartbeat endpoint not found (404) - hub may not implement this yet');
+        return false;
+      }
+
+      if (!response.ok) {
+        throw new HGIHubError(
+          `Worker heartbeat failed: ${response.status} ${response.statusText}`,
+          this._statusToErrorType(response.status),
+          response.status
+        );
+      }
+
+      return true;
+    } catch (error) {
+      if (error instanceof HGIHubError) {
+        throw error;
+      }
+      throw new HGIHubError(
+        `Worker heartbeat failed: ${error instanceof Error ? error.message : String(error)}`,
+        'network',
+        undefined,
+        error instanceof Error ? error : undefined
+      );
+    }
+  }
+
+  /**
+   * Get claimable handoffs debug info
+   *
+   * Endpoint: GET /handoff/claimable/debug?workerId=...
+   *
+   * Returns detailed rejection reasons when claimable is empty.
+   */
+  async getClaimableDebug(workerId: string): Promise<{
+    workerId: string;
+    workerStatus?: string;
+    workerCapabilities?: string[];
+    totalHandoffs?: number;
+    matchingHandoffs?: number;
+    rejections?: Array<{ handoffId: string; reason: string }>;
+    message?: string;
+  }> {
+    try {
+      const response = await this._fetch(`/handoff/claimable/debug?workerId=${encodeURIComponent(workerId)}`, {
+        method: 'GET',
+      });
+
+      if (response.status === 404) {
+        throw new HGIHubError(
+          'Claimable debug endpoint not found (404) - HGI-LOCAL-HUB may not implement this yet',
+          'not_found',
+          404
+        );
+      }
+
+      if (!response.ok) {
+        throw new HGIHubError(
+          `Claimable debug query failed: ${response.status} ${response.statusText}`,
+          this._statusToErrorType(response.status),
+          response.status
+        );
+      }
+
+      return await response.json() as {
+        workerId: string;
+        workerStatus?: string;
+        workerCapabilities?: string[];
+        totalHandoffs?: number;
+        matchingHandoffs?: number;
+        rejections?: Array<{ handoffId: string; reason: string }>;
+        message?: string;
+      };
+    } catch (error) {
+      if (error instanceof HGIHubError) {
+        throw error;
+      }
+      throw new HGIHubError(
+        `Claimable debug query failed: ${error instanceof Error ? error.message : String(error)}`,
+        'network',
+        undefined,
+        error instanceof Error ? error : undefined
       );
     }
   }

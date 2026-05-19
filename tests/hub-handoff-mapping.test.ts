@@ -59,7 +59,7 @@ describe('Hub Handoff Payload Mapping', () => {
 
       // Optional fields
       expect(payload.requiredCapability).toBe('llm');
-      expect(payload.priority).toBe(50);
+      expect(payload.priority).toBe('normal');
       expect(payload.metrics).toBeDefined();
     });
 
@@ -170,7 +170,7 @@ describe('Hub Handoff Payload Mapping', () => {
 
       const payload = (client as unknown as { _toHubHandoffPayload: (r: HGIHubHandoffRequest) => Record<string, unknown> })._toHubHandoffPayload(request);
 
-      expect(payload.priority).toBe(100);
+      expect(payload.priority).toBe('emergency');
     });
 
     test('omits optional fields when not provided', () => {
