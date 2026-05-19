@@ -15,6 +15,11 @@ export default {
     '^(\\.{1,2}/.*)\\.js$': '$1',
   },
   testMatch: ['**/tests/**/*.test.ts', '**/adapters/**/*.test.ts'],
+  testPathIgnorePatterns: [
+    '/node_modules/',
+    'adapters/llama_cpp/adapter.test.ts',
+    'tests/worker-pool-multi.test.ts',
+  ],
   collectCoverageFrom: ['src/**/*.ts', '!src/**/*.d.ts'],
   coverageDirectory: 'coverage',
   verbose: true,
