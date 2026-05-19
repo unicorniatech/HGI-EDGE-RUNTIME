@@ -14,6 +14,7 @@
     "example:handoff": "node dist/examples/handoff-client-demo.js",
     "example:e2e": "node dist/examples/end-to-end-handoff.js",
     "example:claimable": "node dist/examples/claimable-worker-demo.js",
+    "example:pool": "node dist/examples/worker-pool-demo.js",
     "worker:llama": "node dist/examples/llama-handoff-worker.js",
     "lint": "eslint src tests examples adapters --ext .ts",
     "lint:fix": "eslint src tests examples adapters --ext .ts --fix",
