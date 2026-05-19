@@ -319,13 +319,30 @@ async function main(): Promise<void> {
       try {
         claimable = await hubClient.getClaimableHandoffs(WORKER_ID);
       } catch (error) {
-        // Fallback to queue endpoint if claimable not available
-        if (error instanceof HGIHubError && error.type === 'not_found') {
-          console.log('⚠ Claimable endpoint not available, falling back to queue endpoint');
-          usingClaimableEndpoint = false;
-          const queue = await hubClient.listHandoffQueue();
-          claimable = queue.filter(h => h.status === 'queued');
+        // Handle claimable endpoint errors
+        if (error instanceof HGIHubError) {
+          if (error.type === 'not_found') {
+            // 404 - endpoint not available, fallback to queue
+            if (usingClaimableEndpoint) {
+              console.log('⚠ Claimable endpoint not available (404), falling back to queue endpoint');
+              usingClaimableEndpoint = false;
+            }
+            const queue = await hubClient.listHandoffQueue();
+            claimable = queue.filter(h => h.status === 'queued');
+          } else if (error.type === 'network') {
+            // Network error - log clearly and continue polling
+            console.error(`✗ Network error querying claimable: ${error.message}`);
+            console.log('  Will retry on next poll...');
+            await sleep(POLL_MS);
+            continue;
+          } else {
+            // Other errors (500, timeout, etc.) - log and continue
+            console.error(`✗ Claimable query failed (${error.type}): ${error.message}`);
+            await sleep(POLL_MS);
+            continue;
+          }
         } else {
+          // Unknown error - rethrow to be caught by outer handler
           throw error;
         }
       }

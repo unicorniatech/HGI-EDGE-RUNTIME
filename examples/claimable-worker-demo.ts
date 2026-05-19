@@ -49,13 +49,42 @@ async function main(): Promise<void> {
 
   // Check hub reachability
   console.log('Checking hub connection...');
+  console.log(`  URL: ${HUB_URL}`);
+
   const reachable = await hubClient.isReachable();
   if (!reachable) {
-    console.error(`ERROR: Hub not reachable at ${HUB_URL}`);
-    console.error('Make sure hgi-local-node is running');
+    console.error();
+    console.error('╔════════════════════════════════════════════════════════════╗');
+    console.error('║  ERROR: Hub Not Reachable                                  ║');
+    console.error('╚════════════════════════════════════════════════════════════╝');
+    console.error();
+    console.error(`  Could not connect to: ${HUB_URL}`);
+    console.error();
+    console.error('  To fix this:');
+    console.error('  1. Start hgi-local-node:');
+    console.error('     cd /path/to/hgi-local-node');
+    console.error('     npm run dev');
+    console.error();
+    console.error('  2. Verify the hub is running:');
+    console.error(`     curl ${HUB_URL}/health`);
+    console.error();
+    console.error('  3. Check HGI_LOCAL_HUB_URL is correct');
+    console.error();
     process.exit(1);
   }
+
   console.log('✓ Hub connected');
+
+  // Try to get hub health/capabilities for more info
+  try {
+    const health = await hubClient.health();
+    console.log(`  Healthy: ${health.healthy}`);
+    if (health.version) {
+      console.log(`  Version: ${health.version}`);
+    }
+  } catch {
+    // Health check failed but isReachable passed, continue anyway
+  }
   console.log();
 
   // Query claimable handoffs
