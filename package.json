@@ -16,6 +16,7 @@
     "example:claimable": "node dist/examples/claimable-worker-demo.js",
     "example:pool": "node dist/examples/worker-pool-demo.js",
     "example:coordination": "node dist/examples/local-worker-coordination-demo.js",
+    "example:multi-worker": "node dist/examples/real-multi-worker-pool-demo.js",
     "worker:llama": "node dist/examples/llama-handoff-worker.js",
     "lint": "eslint src tests examples adapters --ext .ts",
     "lint:fix": "eslint src tests examples adapters --ext .ts --fix",

@@ -23,3 +23,17 @@ export {
   validateWorkerContract,
   type WorkerRegistrationOptions,
 } from './worker-registration.js';
+export {
+  LLMProcessor,
+  EVAProcessor,
+  STTProcessor,
+  TTSProcessor,
+  VisionProcessor,
+  EmergencyProcessor,
+  GenericProcessor,
+  createProcessor,
+  getAvailableProcessorTypes,
+  type ProcessorResult,
+  type ProcessorRequest,
+  type WorkerProcessor,
+} from './worker-processors.js';

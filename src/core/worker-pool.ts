@@ -11,6 +11,10 @@
  */
 
 import type { HGIHubClient } from './hgi-hub-client.js';
+import type {
+  WorkerCapabilityContract,
+  WorkerType,
+} from '../types/worker-capability.js';
 
 /**
  * Worker capacity configuration
@@ -69,6 +73,10 @@ export interface PoolWorker {
   isRunning: boolean;
   /** Last poll timestamp */
   lastPollAt: number | null;
+  /** Optional capability contract for this worker */
+  contract?: WorkerCapabilityContract;
+  /** Worker type from contract */
+  workerType?: WorkerType;
 }
 
 /**
@@ -144,6 +152,44 @@ export class WorkerPool {
     };
 
     this._workers.set(workerId, worker);
+    return worker;
+  }
+
+  /**
+   * Add a worker with capability contract to the pool
+   */
+  addWorkerWithContract(
+    contract: WorkerCapabilityContract,
+    hubClient: HGIHubClient
+  ): PoolWorker {
+    if (this._workers.has(contract.id)) {
+      throw new Error(`Worker ${contract.id} already exists in pool`);
+    }
+
+    const worker: PoolWorker = {
+      id: contract.id,
+      hubClient,
+      capacity: {
+        maxConcurrentJobs: contract.maxConcurrentJobs,
+        currentActiveJobs: 0,
+        supportedCapabilities: contract.capabilities,
+      },
+      metrics: {
+        completedJobs: 0,
+        failedJobs: 0,
+        averageProcessingTimeMs: 0,
+        lastActivityAt: null,
+        utilizationPercent: 0,
+        totalProcessingTimeMs: 0,
+      },
+      activeJobs: new Map(),
+      isRunning: false,
+      lastPollAt: null,
+      contract,
+      workerType: contract.workerType,
+    };
+
+    this._workers.set(contract.id, worker);
     return worker;
   }
 
@@ -299,6 +345,107 @@ export class WorkerPool {
       poolUtilizationPercent: totalCapacity > 0 ? Math.round((totalActiveJobs / totalCapacity) * 100) : 0,
       totalCompletedJobs,
       totalFailedJobs,
+    };
+  }
+
+  /**
+   * Get pool statistics by worker type
+   */
+  getPoolStatsByWorkerType(): Map<WorkerType, { count: number; activeJobs: number; completedJobs: number; failedJobs: number }> {
+    const byType = new Map<WorkerType, { count: number; activeJobs: number; completedJobs: number; failedJobs: number }>();
+
+    for (const worker of this._workers.values()) {
+      const type = worker.workerType ?? 'generic';
+      const existing = byType.get(type);
+
+      if (existing) {
+        existing.count++;
+        existing.activeJobs += worker.activeJobs.size;
+        existing.completedJobs += worker.metrics.completedJobs;
+        existing.failedJobs += worker.metrics.failedJobs;
+      } else {
+        byType.set(type, {
+          count: 1,
+          activeJobs: worker.activeJobs.size,
+          completedJobs: worker.metrics.completedJobs,
+          failedJobs: worker.metrics.failedJobs,
+        });
+      }
+    }
+
+    return byType;
+  }
+
+  /**
+   * Get pool statistics by capability
+   */
+  getPoolStatsByCapability(): Map<string, { workerCount: number; activeJobs: number; capacity: number; utilizationPercent: number }> {
+    const byCapability = new Map<string, { workerCount: number; activeJobs: number; capacity: number; utilizationPercent: number }>();
+
+    for (const worker of this._workers.values()) {
+      for (const capability of worker.capacity.supportedCapabilities) {
+        const existing = byCapability.get(capability);
+
+        if (existing) {
+          existing.workerCount++;
+          existing.activeJobs += worker.activeJobs.size;
+          existing.capacity += worker.capacity.maxConcurrentJobs;
+        } else {
+          byCapability.set(capability, {
+            workerCount: 1,
+            activeJobs: worker.activeJobs.size,
+            capacity: worker.capacity.maxConcurrentJobs,
+            utilizationPercent: worker.metrics.utilizationPercent,
+          });
+        }
+      }
+    }
+
+    // Recalculate utilization for each capability
+    for (const stats of byCapability.values()) {
+      stats.utilizationPercent = stats.capacity > 0
+        ? Math.round((stats.activeJobs / stats.capacity) * 100)
+        : 0;
+    }
+
+    return byCapability;
+  }
+
+  /**
+   * Route handoff to best worker by capability
+   * Returns null if no suitable worker found
+   */
+  routeHandoff(requiredCapability: string, preferredWorkerType?: WorkerType): { worker: PoolWorker; routingDecision: string } | null {
+    // Get all workers that support this capability and have capacity
+    const eligibleWorkers = Array.from(this._workers.values()).filter(w => {
+      if (!w.isRunning) return false;
+      if (!this.hasCapacity(w)) return false;
+      if (!w.capacity.supportedCapabilities.includes(requiredCapability)) return false;
+      return true;
+    });
+
+    if (eligibleWorkers.length === 0) {
+      return null;
+    }
+
+    // If preferred worker type specified, try to find match
+    if (preferredWorkerType) {
+      const preferredWorkers = eligibleWorkers.filter(w => w.workerType === preferredWorkerType);
+      if (preferredWorkers.length > 0) {
+        // Sort by utilization and pick least loaded
+        preferredWorkers.sort((a, b) => a.metrics.utilizationPercent - b.metrics.utilizationPercent);
+        return {
+          worker: preferredWorkers[0],
+          routingDecision: `type-preferred:${preferredWorkerType}`,
+        };
+      }
+    }
+
+    // Fall back to least loaded eligible worker
+    eligibleWorkers.sort((a, b) => a.metrics.utilizationPercent - b.metrics.utilizationPercent);
+    return {
+      worker: eligibleWorkers[0],
+      routingDecision: 'least-loaded',
     };
   }
 
