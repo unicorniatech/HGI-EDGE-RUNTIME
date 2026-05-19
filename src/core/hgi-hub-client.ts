@@ -143,18 +143,59 @@ export class HGIHubClient {
   }
 
   /**
+   * Convert rich internal handoff request to hub-compatible payload
+   * Maps objects to strings as expected by hgi-local-node API
+   */
+  private _toHubHandoffPayload(request: HGIHubHandoffRequest): Record<string, unknown> {
+    // Convert localModel object to string (modelId)
+    const localModelStr = typeof request.localModel === 'string'
+      ? request.localModel
+      : request.localModel?.modelId ?? 'unknown';
+
+    // Convert handoffSignal object to string representation
+    const handoffSignalStr = typeof request.handoffSignal === 'string'
+      ? request.handoffSignal
+      : JSON.stringify(request.handoffSignal);
+
+    // Build hub-compatible payload
+    const payload: Record<string, unknown> = {
+      requestId: request.requestId,
+      sourceRuntimeId: request.sourceRuntimeId,
+      localModel: localModelStr,
+      originalRequest: request.originalRequest,
+      handoffSignal: handoffSignalStr,
+    };
+
+    // Add optional fields if present
+    if (request.metrics) {
+      payload.metrics = request.metrics;
+    }
+    if (request.requestedCapability) {
+      payload.requiredCapability = request.requestedCapability;
+    }
+    if (request.priority !== undefined) {
+      payload.priority = request.priority;
+    }
+
+    return payload;
+  }
+
+  /**
    * Submit handoff request to hub
    *
    * Endpoint: POST /handoff
    */
   async submitHandoff(request: HGIHubHandoffRequest): Promise<HGIHubHandoffResponse> {
     try {
+      // Map to hub-compatible payload
+      const hubPayload = this._toHubHandoffPayload(request);
+
       const response = await this._fetch('/handoff', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(request),
+        body: JSON.stringify(hubPayload),
       });
 
       if (response.status === 404) {
@@ -172,6 +213,20 @@ export class HGIHubClient {
           error.message ?? 'Hub temporarily unavailable',
           'unavailable',
           503
+        );
+      }
+
+      if (response.status === 400) {
+        // Bad request - log detailed error info
+        const errorBody = await response.json().catch(() => null) as { message?: string; errors?: string[] } | null;
+        console.error('❌ Handoff submission rejected (400 Bad Request):');
+        console.error('   Response:', errorBody ? JSON.stringify(errorBody, null, 2) : 'No response body');
+        console.error('   Outgoing payload shape:', Object.keys(hubPayload).join(', '));
+        console.error('   Payload:', JSON.stringify(hubPayload, null, 2));
+        throw new HGIHubError(
+          `Handoff submission failed: ${response.status} ${response.statusText}${errorBody?.message ? ` - ${errorBody.message}` : ''}`,
+          'invalid',
+          response.status
         );
       }
 

@@ -55,6 +55,8 @@ export interface HGIHubHandoffRequest {
   requestedCapability: HGIHubCapability;
   /** Timestamp when request was created (ISO 8601) */
   createdAt: string;
+  /** Optional priority level (higher = more urgent) */
+  priority?: number;
 }
 
 /**
