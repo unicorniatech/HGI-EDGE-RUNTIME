@@ -24,7 +24,6 @@ import { createLlamaCppAdapter } from '../adapters/llama_cpp/adapter.js';
 import { createHandoffRuntime } from '../src/core/handoff-runtime.js';
 import type { InferenceRequest, InferenceResponse } from '../src/types/adapter.js';
 import type { ResourceMetricsSnapshot } from '../src/types/handoff.js';
-import type { HGIHubHandoffResponse } from '../src/types/hub-handoff.js';
 
 // Configuration
 const MODEL_PATH = process.env.HGI_TEST_MODEL_PATH ?? './models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf';

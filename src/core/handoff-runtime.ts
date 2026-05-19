@@ -15,7 +15,6 @@ import type { InferenceRequest, InferenceResponse } from '../types/adapter.js';
 import type {
   HGIHubHandoffRequest,
   HGIHubHandoffResponse,
-  HGIHubError,
 } from '../types/hub-handoff.js';
 import { HGIHubError as HGIHubErrorClass } from '../types/hub-handoff.js';
 
