@@ -260,6 +260,234 @@ export class HGIHubClient {
   }
 
   /**
+   * List handoff queue
+   *
+   * Endpoint: GET /handoff/queue
+   * Returns queued handoffs available for workers
+   */
+  async listHandoffQueue(): Promise<Array<{ id: string; status: string; requestedCapability: string; createdAt: string }>> {
+    try {
+      const response = await this._fetch('/handoff/queue', { method: 'GET' });
+
+      if (response.status === 404) {
+        throw new HGIHubError(
+          'Handoff queue endpoint not found (404) - HGI-LOCAL-HUB may not implement this yet',
+          'not_found',
+          404
+        );
+      }
+
+      if (!response.ok) {
+        throw new HGIHubError(
+          `Queue query failed: ${response.status} ${response.statusText}`,
+          this._statusToErrorType(response.status),
+          response.status
+        );
+      }
+
+      const data = await response.json() as { handoffs?: Array<{ id: string; status: string; requestedCapability: string; createdAt: string }> };
+      return data.handoffs ?? [];
+    } catch (error) {
+      if (error instanceof HGIHubError) {
+        throw error;
+      }
+      throw new HGIHubError(
+        `Queue query failed: ${error instanceof Error ? error.message : String(error)}`,
+        'network',
+        undefined,
+        error instanceof Error ? error : undefined
+      );
+    }
+  }
+
+  /**
+   * Claim a handoff for processing
+   *
+   * Endpoint: POST /handoff/:id/claim
+   */
+  async claimHandoff(handoffId: string, workerId: string): Promise<boolean> {
+    try {
+      const response = await this._fetch(`/handoff/${encodeURIComponent(handoffId)}/claim`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ workerId }),
+      });
+
+      if (response.status === 404) {
+        throw new HGIHubError(
+          'Handoff claim endpoint not found (404) - HGI-LOCAL-HUB may not implement this yet',
+          'not_found',
+          404
+        );
+      }
+
+      if (response.status === 409) {
+        // Handoff already claimed by another worker
+        return false;
+      }
+
+      if (!response.ok) {
+        throw new HGIHubError(
+          `Claim failed: ${response.status} ${response.statusText}`,
+          this._statusToErrorType(response.status),
+          response.status
+        );
+      }
+
+      return true;
+    } catch (error) {
+      if (error instanceof HGIHubError) {
+        throw error;
+      }
+      throw new HGIHubError(
+        `Claim failed: ${error instanceof Error ? error.message : String(error)}`,
+        'network',
+        undefined,
+        error instanceof Error ? error : undefined
+      );
+    }
+  }
+
+  /**
+   * Mark handoff as started
+   *
+   * Endpoint: POST /handoff/:id/start
+   */
+  async startHandoff(handoffId: string): Promise<boolean> {
+    try {
+      const response = await this._fetch(`/handoff/${encodeURIComponent(handoffId)}/start`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.status === 404) {
+        throw new HGIHubError(
+          'Handoff start endpoint not found (404) - HGI-LOCAL-HUB may not implement this yet',
+          'not_found',
+          404
+        );
+      }
+
+      if (!response.ok) {
+        throw new HGIHubError(
+          `Start failed: ${response.status} ${response.statusText}`,
+          this._statusToErrorType(response.status),
+          response.status
+        );
+      }
+
+      return true;
+    } catch (error) {
+      if (error instanceof HGIHubError) {
+        throw error;
+      }
+      throw new HGIHubError(
+        `Start failed: ${error instanceof Error ? error.message : String(error)}`,
+        'network',
+        undefined,
+        error instanceof Error ? error : undefined
+      );
+    }
+  }
+
+  /**
+   * Complete handoff with result
+   *
+   * Endpoint: POST /handoff/:id/complete
+   */
+  async completeHandoff(
+    handoffId: string,
+    result: { text: string; model: string; workerId: string; metrics?: Record<string, unknown> }
+  ): Promise<boolean> {
+    try {
+      const response = await this._fetch(`/handoff/${encodeURIComponent(handoffId)}/complete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ result }),
+      });
+
+      if (response.status === 404) {
+        throw new HGIHubError(
+          'Handoff complete endpoint not found (404) - HGI-LOCAL-HUB may not implement this yet',
+          'not_found',
+          404
+        );
+      }
+
+      if (!response.ok) {
+        throw new HGIHubError(
+          `Complete failed: ${response.status} ${response.statusText}`,
+          this._statusToErrorType(response.status),
+          response.status
+        );
+      }
+
+      return true;
+    } catch (error) {
+      if (error instanceof HGIHubError) {
+        throw error;
+      }
+      throw new HGIHubError(
+        `Complete failed: ${error instanceof Error ? error.message : String(error)}`,
+        'network',
+        undefined,
+        error instanceof Error ? error : undefined
+      );
+    }
+  }
+
+  /**
+   * Mark handoff as failed
+   *
+   * Endpoint: POST /handoff/:id/fail
+   */
+  async failHandoff(handoffId: string, error: { message: string; code?: string }): Promise<boolean> {
+    try {
+      const response = await this._fetch(`/handoff/${encodeURIComponent(handoffId)}/fail`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ error }),
+      });
+
+      if (response.status === 404) {
+        throw new HGIHubError(
+          'Handoff fail endpoint not found (404) - HGI-LOCAL-HUB may not implement this yet',
+          'not_found',
+          404
+        );
+      }
+
+      if (!response.ok) {
+        throw new HGIHubError(
+          `Fail call failed: ${response.status} ${response.statusText}`,
+          this._statusToErrorType(response.status),
+          response.status
+        );
+      }
+
+      return true;
+    } catch (err) {
+      if (err instanceof HGIHubError) {
+        throw err;
+      }
+      throw new HGIHubError(
+        `Fail call failed: ${err instanceof Error ? err.message : String(err)}`,
+        'network',
+        undefined,
+        err instanceof Error ? err : undefined
+      );
+    }
+  }
+
+  /**
    * Check if hub is reachable
    *
    * Returns true if health check succeeds, false otherwise
