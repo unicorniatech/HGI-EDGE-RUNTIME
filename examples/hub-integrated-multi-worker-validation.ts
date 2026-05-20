@@ -32,6 +32,7 @@ import {
   type ProcessorRequest,
 } from '../src/core/worker-processors.js';
 import type { HGIHubHandoffResponse } from '../src/types/hub-handoff.js';
+import type { WorkerType } from '../src/types/worker-capability.js';
 
 // Configuration
 const HUB_URL = process.env.HGI_LOCAL_HUB_URL ?? 'http://localhost:4010';
@@ -119,43 +120,42 @@ async function main(): Promise<void> {
     enableLoadBalancing: true,
   });
 
-  // Create aligned worker contracts with hub-compatible capabilities
-  // All workers MUST include "generic" and exact capability strings the hub expects
+  // Create aligned worker contracts with EXACT capabilities (NO generic to prevent over-matching)
   const workerContracts: WorkerCapabilityContract[] = [
     buildWorkerContract({
       workerId: 'llm-01',
       workerType: 'llm',
-      capabilities: ['generic', 'llm', 'text-generation'],
+      capabilities: ['llm', 'text-generation'], // Only LLM capabilities, NO generic
       maxConcurrentJobs: 2,
     }),
     buildWorkerContract({
       workerId: 'eva-01',
       workerType: 'eva',
-      capabilities: ['generic', 'eva', 'reasoning', 'analysis'],
+      capabilities: ['eva', 'reasoning', 'analysis'], // Only EVA capabilities, NO generic
       maxConcurrentJobs: 1,
     }),
     buildWorkerContract({
       workerId: 'stt-01',
       workerType: 'stt',
-      capabilities: ['generic', 'stt', 'speech-to-text', 'audio-transcription'],
+      capabilities: ['stt', 'speech-to-text', 'audio-transcription'], // Only STT capabilities, NO generic
       maxConcurrentJobs: 2,
     }),
     buildWorkerContract({
       workerId: 'tts-01',
       workerType: 'tts',
-      capabilities: ['generic', 'tts', 'text-to-speech', 'speech-synthesis'],
+      capabilities: ['tts', 'text-to-speech', 'speech-synthesis'], // Only TTS capabilities, NO generic
       maxConcurrentJobs: 2,
     }),
     buildWorkerContract({
       workerId: 'vision-01',
       workerType: 'vision',
-      capabilities: ['generic', 'vision', 'image-analysis'],
+      capabilities: ['vision', 'image-analysis'], // Only Vision capabilities, NO generic
       maxConcurrentJobs: 1,
     }),
     buildWorkerContract({
       workerId: 'emergency-01',
       workerType: 'emergency',
-      capabilities: ['generic', 'emergency', 'priority-inference', 'redvecinal-emergency'],
+      capabilities: ['emergency', 'priority-inference', 'redvecinal-emergency'], // Only Emergency capabilities, NO generic
       maxConcurrentJobs: 3,
     }),
   ];
@@ -327,6 +327,13 @@ async function main(): Promise<void> {
 
   for (const worker of pool.workers) {
     console.log(`Checking claimable for worker: ${worker.id} (${worker.workerType ?? 'unknown'})`);
+
+    // Refresh heartbeat before checking claimable to prevent staleness
+    try {
+      await hubClient.sendWorkerHeartbeat(worker.id, 'online');
+    } catch {
+      // Ignore heartbeat errors
+    }
 
     try {
       let claimable: Array<{ id: string; status: string; requestedCapability: string; createdAt: string; priority?: number; estimatedComplexity?: string }> = [];
@@ -521,13 +528,47 @@ async function main(): Promise<void> {
   }
   console.log();
 
+  // Distribution assertions - each worker type must complete at least 1 job
+  console.log('━'.repeat(60));
+  console.log('Step 7b: Distribution Validation');
+  console.log('━'.repeat(60));
+  console.log();
+
+  const requiredWorkerTypes = ['llm', 'eva', 'stt', 'tts', 'vision', 'emergency'];
+  const distributionFailures: string[] = [];
+
+  for (const workerType of requiredWorkerTypes) {
+    const stats = byType.get(workerType as WorkerType);
+    const completed = stats?.completedJobs ?? 0;
+
+    if (completed === 0) {
+      distributionFailures.push(`${workerType.toUpperCase()} worker completed 0 jobs (required: at least 1)`);
+      console.log(`❌ ${workerType.toUpperCase()}: FAILED - 0 jobs completed`);
+    } else {
+      console.log(`✅ ${workerType.toUpperCase()}: PASSED - ${completed} jobs completed`);
+    }
+  }
+
+  if (distributionFailures.length > 0) {
+    console.log();
+    console.log('❌ DISTRIBUTION VALIDATION FAILED');
+    console.log('Missing job completions:');
+    for (const failure of distributionFailures) {
+      console.log(`  - ${failure}`);
+    }
+  } else {
+    console.log();
+    console.log('✅ DISTRIBUTION VALIDATION PASSED - All worker types completed jobs');
+  }
+  console.log();
+
   // Step 8: Final validation status
   console.log('━'.repeat(60));
   console.log('Step 8: Final Validation Status');
   console.log('━'.repeat(60));
   console.log();
 
-  const passed = routingAccuracy >= 80 && successRate >= 80;
+  const passed = routingAccuracy >= 80 && successRate >= 80 && distributionFailures.length === 0;
 
   if (passed) {
     console.log('╔════════════════════════════════════════════════════════════╗');
