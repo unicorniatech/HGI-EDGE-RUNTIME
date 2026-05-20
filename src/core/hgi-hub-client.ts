@@ -408,7 +408,7 @@ export class HGIHubClient {
         claimable?: Array<{
           handoffId: string;
           status?: string;
-          requestedCapability?: string;
+          requiredCapability?: string;
           queuedAt: string;
           priority?: number;
           estimatedComplexity?: string;
@@ -422,7 +422,7 @@ export class HGIHubClient {
       return (data.claimable ?? []).map(item => ({
         id: item.handoffId,
         status: item.status ?? 'queued',
-        requestedCapability: item.requestedCapability ?? 'llm',
+        requestedCapability: item.requiredCapability ?? 'llm',
         createdAt: item.queuedAt,
         priority: item.priority,
         estimatedComplexity: item.estimatedComplexity,
