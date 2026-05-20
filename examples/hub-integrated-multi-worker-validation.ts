@@ -173,10 +173,38 @@ async function main(): Promise<void> {
   console.log(`Pool started with ${workerContracts.length} workers`);
   console.log();
 
-  // Step 3b: Start worker heartbeat loop
+  // Step 3b: Register workers with hub and start heartbeat loop
   console.log('━'.repeat(60));
-  console.log('Step 3b: Start Worker Heartbeat Loop');
+  console.log('Step 3b: Register Workers with Hub & Start Heartbeat');
   console.log('━'.repeat(60));
+  console.log();
+
+  // Map edge runtime worker types to hub-compatible types
+  const workerTypeMap: Record<string, 'llama' | 'stt' | 'embedding' | 'rag' | 'generic'> = {
+    'llm': 'llama',
+    'eva': 'generic',
+    'stt': 'stt',
+    'tts': 'generic',
+    'vision': 'generic',
+    'emergency': 'generic',
+  };
+
+  // Register workers with hub first (required before heartbeat)
+  console.log('Registering workers with hub...');
+  for (const contract of workerContracts) {
+    try {
+      const hubWorkerType = workerTypeMap[contract.workerType] || 'generic';
+      await hubClient.registerWorker(
+        contract.id,
+        hubWorkerType,
+        contract.capabilities,
+        contract.maxConcurrentJobs
+      );
+      console.log(`  ✓ Registered with hub: ${contract.id} (type: ${hubWorkerType})`);
+    } catch (error) {
+      console.log(`  ⚠ Registration failed for ${contract.id}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
   console.log();
 
   // Send immediate heartbeat to register workers as fresh

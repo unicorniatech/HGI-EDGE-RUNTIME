@@ -1,5 +1,5 @@
-/** @type {import('jest').Config} */
-export default {
+/** @type {import('ts-jest').JestConfigWithTsJest} */
+module.exports = {
   preset: 'ts-jest/presets/default-esm',
   testEnvironment: 'node',
   extensionsToTreatAsEsm: ['.ts'],
@@ -15,11 +15,6 @@ export default {
     '^(\\.{1,2}/.*)\\.js$': '$1',
   },
   testMatch: ['**/tests/**/*.test.ts', '**/adapters/**/*.test.ts'],
-  testPathIgnorePatterns: [
-    '/node_modules/',
-    'adapters/llama_cpp/adapter.test.ts',
-    'tests/worker-pool-multi.test.ts',
-  ],
   collectCoverageFrom: ['src/**/*.ts', '!src/**/*.d.ts'],
   coverageDirectory: 'coverage',
   verbose: true,

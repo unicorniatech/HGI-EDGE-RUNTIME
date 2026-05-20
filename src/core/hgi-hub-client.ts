@@ -628,6 +628,56 @@ export class HGIHubClient {
   }
 
   /**
+   * Register a worker with the hub
+   *
+   * Endpoint: POST /workers/register
+   *
+   * Workers must be registered before sending heartbeats or claiming handoffs.
+   */
+  async registerWorker(
+    workerId: string,
+    workerType: 'llama' | 'stt' | 'embedding' | 'rag' | 'generic',
+    capabilities: string[],
+    maxConcurrentJobs: number = 1
+  ): Promise<boolean> {
+    try {
+      const response = await this._fetch('/workers/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          workerId,
+          workerType,
+          capabilities,
+          maxConcurrentJobs,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' })) as { error?: string; message?: string };
+        throw new HGIHubError(
+          `Worker registration failed: ${response.status} ${response.statusText} - ${errorData.error || errorData.message || ''}`,
+          this._statusToErrorType(response.status),
+          response.status
+        );
+      }
+
+      return true;
+    } catch (error) {
+      if (error instanceof HGIHubError) {
+        throw error;
+      }
+      throw new HGIHubError(
+        `Worker registration failed: ${error instanceof Error ? error.message : String(error)}`,
+        'network',
+        undefined,
+        error instanceof Error ? error : undefined
+      );
+    }
+  }
+
+  /**
    * Send worker heartbeat to keep worker fresh
    *
    * Endpoint: POST /workers/heartbeat
