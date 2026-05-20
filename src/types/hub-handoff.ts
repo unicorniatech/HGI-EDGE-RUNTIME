@@ -15,12 +15,15 @@ import type { InferenceRequest, InferenceResponse } from './adapter.js';
  * Capability types that can be requested from HGI-LOCAL-HUB
  */
 export type HGIHubCapability =
-  | 'llm'           // Large language model inference
-  | 'stt'           // Speech-to-text
-  | 'embedding'     // Text embeddings
-  | 'rag'           // Retrieval-augmented generation
-  | 'vision'        // Vision/multimodal
-  | 'tts';          // Text-to-speech
+  | 'llm'              // Large language model inference
+  | 'eva'              // Enhanced reasoning/analysis
+  | 'stt'              // Speech-to-text
+  | 'tts'              // Text-to-speech
+  | 'vision'           // Vision/multimodal
+  | 'emergency'        // Emergency/priority inference
+  | 'text-generation'  // Text generation
+  | 'embedding'        // Text embeddings
+  | 'rag';             // Retrieval-augmented generation
 
 /**
  * Handoff request to HGI-LOCAL-HUB

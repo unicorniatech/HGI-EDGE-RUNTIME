@@ -289,7 +289,7 @@ async function main(): Promise<void> {
           crossedThresholds: [],
         },
         metrics: { timestamp: now },
-        requestedCapability: handoff.capability as 'llm' | 'stt' | 'embedding' | 'rag' | 'vision' | 'tts',
+        requestedCapability: handoff.capability as 'llm' | 'eva' | 'stt' | 'tts' | 'vision' | 'emergency' | 'text-generation',
         createdAt: now,
         priority: handoff.priorityValue, // Include priority for hub
       });

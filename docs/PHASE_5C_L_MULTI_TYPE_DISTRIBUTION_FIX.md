@@ -135,39 +135,43 @@ const passed = routingAccuracy >= 80 &&
 | llm | normal | ✅ Submitted |
 | text-generation | normal | ✅ Submitted |
 
-### Hub Queue Issue
+### Hub Implementation Issue - BLOCKER
 
-```
-Total handoffs in queue: ~97
-Old LLM handoffs from previous runs: ~90
-New handoffs from current run: 8
+**Discovery**: Hub does NOT store `requiredCapability` field from handoff payload.
 
-Problem: New handoffs are positions 85-92 in queue
-Claimable endpoint returns first 12: positions 1-12 (all old LLM)
+**Evidence**:
+- Client sends: `requiredCapability: "eva"` (or stt, tts, vision, emergency)
+- Hub queue stores: Only `handoffSignal.reason` field
+- Hub claimable endpoint: Looks for `requiredCapability` field (which doesn't exist)
+- Result: All handoffs appear as LLM or are unmatched
+
+**Queue State**:
 ```
+Total handoffs: 105
+Stored fields: handoffId, requestId, sourceRuntimeId, localModel, handoffSignal, queuedAt, priority, metrics
+Missing: requiredCapability (not stored by hub)
+```
+
+**Root Cause**: HGI-LOCAL-HUB (hgi-local-node) does not persist the `requiredCapability` field from the handoff request payload. The hub only stores the `reason` string inside the `handoffSignal` JSON object.
+
+**Impact**: Multi-type claim distribution cannot work until hub is updated to store and use `requiredCapability` for worker matching.
 
 ---
 
 ## Required Next Steps
 
-### Option 1: Clear Hub Queue (Recommended)
+### Hub-Side Fix Required
 
-Restart hub daemon with clean state:
-```powershell
-cd C:\Users\molie\VistaDev\HGI-NODO\hgi-local-node
-pnpm build
-node apps/node-daemon/dist/index.js
-```
+HGI-LOCAL-HUB must be updated to:
+1. Accept and store `requiredCapability` field in handoff payload
+2. Use `requiredCapability` for worker capability matching in claimable endpoint
+3. Return `requiredCapability` in claimable and queue responses
 
-This clears the in-memory queue and allows fresh validation.
+**File to modify**: `C:\Users\molie\VistaDev\HGI-NODO\hgi-local-node/apps/node-daemon/src/routes/handoff.ts`
 
-### Option 2: Submit More Handoffs Per Type
+### Workaround (Not Recommended)
 
-Increase handoff count per type to 20+ so they appear in claimable results despite queue backlog.
-
-### Option 3: Process All Queue Pages
-
-Modify validation to paginate through all claimable results, not just first 12.
+Until hub is fixed, multi-type distribution cannot be validated. The hub implementation is the blocker.
 
 ---
 
@@ -175,46 +179,59 @@ Modify validation to paginate through all claimable results, not just first 12.
 
 | File | Change |
 |------|--------|
-| `examples/hub-integrated-multi-worker-validation.ts` | Removed "generic" from capabilities, added heartbeat refresh, added distribution validation |
+| `examples/hub-integrated-multi-worker-validation.ts` | Removed "generic" from capabilities, added heartbeat refresh, added distribution validation, fixed type cast for requestedCapability |
+| `src/types/hub-handoff.ts` | Added 'eva', 'emergency', 'text-generation' to HGIHubCapability type |
 
 ---
 
-## Validation Command
+## Final Validation Results
 
-```powershell
-npm run example:hub-integrated-multi-worker
+### What Was Fixed
+- ✅ Removed "generic" capability from workers (prevents over-matching)
+- ✅ Added heartbeat refresh before each claim check (prevents staleness)
+- ✅ Added distribution validation assertions (proves each worker type processes jobs)
+- ✅ Updated pass/fail criteria to include distribution
+- ✅ Fixed HGIHubCapability type to include all worker capabilities
+- ✅ Fixed requestedCapability type cast in validation script
+
+### Blocker Discovery
+- ❌ HGI-LOCAL-HUB does NOT store `requiredCapability` field from handoff payload
+- ❌ Hub only stores `handoffSignal.reason` (capability string inside JSON)
+- ❌ Hub claimable endpoint looks for `requiredCapability` field (which doesn't exist in stored handoffs)
+- ❌ Result: All handoffs appear as LLM or are unmatched, preventing multi-type distribution
+
+### Validation Status
 ```
-
-### Expected Result After Hub Restart
-
-```
-✅ DISTRIBUTION VALIDATION PASSED - All worker types completed jobs
-
-LLM: PASSED - 2 jobs completed
-EVA: PASSED - 1 job completed
-STT: PASSED - 1 job completed
-TTS: PASSED - 1 job completed
-VISION: PASSED - 1 job completed
-EMERGENCY: PASSED - 1 job completed
+Routing Accuracy: 100.0% (3/3 correctly routed)
+Processing Success Rate: 100.0% (3/3 completed)
+Distribution Validation: FAILED
+  - LLM: 3 completed ✅
+  - EVA: 0 completed ❌
+  - STT: 0 completed ❌
+  - TTS: 0 completed ❌
+  - VISION: 0 completed ❌
+  - EMERGENCY: 0 completed ❌
 ```
 
 ---
 
 ## Honest Assessment
 
-**What Was Fixed**:
-- ✅ Capability alignment (removed "generic" over-matching)
+**What Was Fixed (HGI-EDGE-RUNTIME)**:
+- ✅ Worker capability alignment (removed "generic" over-matching)
 - ✅ Heartbeat refresh during claiming
 - ✅ Distribution validation assertions
 - ✅ Pass/fail criteria includes distribution
+- ✅ Type system support for all worker capabilities
 
-**What's Blocking Success**:
-- 🔄 Hub queue has 97 old LLM handoffs from previous runs
-- 🔄 New handoffs are buried and not visible to claimable endpoint
+**What's Blocking Success (HGI-LOCAL-HUB)**:
+- ❌ Hub does not persist `requiredCapability` field
+- ❌ Hub claimable endpoint cannot match workers by capability
+- ❌ Multi-type distribution impossible without hub fix
 
 **Action Required**:
-Restart hgi-local-node hub to clear queue, then re-run validation.
+Update HGI-LOCAL-HUB to store and use `requiredCapability` field for worker matching.
 
 ---
 
-**Status**: Core fixes complete. Hub queue cleanup required for full validation pass.
+**Status**: HGI-EDGE-RUNTIME fixes complete. Blocked by hub implementation.
