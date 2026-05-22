@@ -118,6 +118,14 @@ async function main(): Promise<void> {
     hubUrl: HUB_URL,
     pollIntervalMs: 1000,
     enableLoadBalancing: true,
+    recoveryPolicy: {
+      maxConsecutiveFailures: 3,
+      staleGraceMs: 30000,
+      offlineGraceMs: 60000,
+      quarantineMs: 5000,
+      recoveryHeartbeatRequired: true,
+      allowAutoRecovery: true,
+    },
   });
 
   // Create aligned worker contracts with EXACT capabilities (NO generic to prevent over-matching)
@@ -736,6 +744,99 @@ async function main(): Promise<void> {
     console.log(`⚠ ${mismatchCount} worker(s) have health mismatches`);
   }
   console.log();
+
+  // Step 7e: Worker Auto-Recovery + Quarantine Validation
+  console.log('━'.repeat(60));
+  console.log('Step 7e: Worker Auto-Recovery + Quarantine Validation');
+  console.log('━'.repeat(60));
+  console.log();
+
+  console.log('Testing worker quarantine and auto-recovery...');
+  console.log();
+
+  // Select STT worker for quarantine test
+  const quarantineTestWorker = pool.workers.find(w => w.workerType === 'stt');
+  if (!quarantineTestWorker) {
+    console.log('⚠ No STT worker found for quarantine test, skipping');
+  } else {
+    console.log(`Selected worker for quarantine test: ${quarantineTestWorker.id} (${quarantineTestWorker.workerType})`);
+    console.log();
+
+    // Record failures to trigger quarantine
+    console.log('Recording consecutive failures...');
+    for (let i = 0; i < 3; i++) {
+      pool.recordWorkerFailure(quarantineTestWorker.id);
+    }
+    console.log(`✓ Recorded 3 consecutive failures`);
+    console.log();
+
+    // Check if worker is quarantined
+    const extendedDiagnostics = pool.getExtendedWorkerDiagnostics();
+    const workerDiagnostics = extendedDiagnostics.find(w => w.workerId === quarantineTestWorker.id);
+    console.log('Worker state after failures:');
+    console.log(`  Consecutive Failures: ${workerDiagnostics?.consecutiveFailures ?? 0}`);
+    console.log(`  Quarantined: ${workerDiagnostics?.quarantined ? 'YES' : 'NO'}`);
+    console.log(`  Health Status: ${workerDiagnostics?.healthStatus ?? 'unknown'}`);
+    console.log(`  Eligible: ${workerDiagnostics?.skipReason ? 'NO (' + workerDiagnostics.skipReason + ')' : 'YES'}`);
+    console.log();
+
+    // Check eligibility
+    const eligibility = pool.isWorkerEligible(quarantineTestWorker.id);
+    console.log(`Worker eligibility check: ${eligibility.eligible ? 'ELIGIBLE' : 'NOT ELIGIBLE'}`);
+    if (!eligibility.eligible) {
+      console.log(`  Skip reason: ${eligibility.skipReason}`);
+    }
+    console.log();
+
+    // Wait for quarantine to expire (simulated with short duration)
+    console.log('Waiting for quarantine to expire...');
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    console.log();
+
+    // Send heartbeat and attempt recovery
+    console.log('Sending heartbeat and attempting recovery...');
+    await hubClient.sendWorkerHeartbeat(quarantineTestWorker.id, 'online');
+    pool.updateWorkerHealth(quarantineTestWorker.id, Date.now());
+    const recovered = await pool.attemptWorkerRecovery(quarantineTestWorker.id);
+    console.log(`Recovery attempt: ${recovered ? 'SUCCESS' : 'FAILED'}`);
+    console.log();
+
+    // Check worker state after recovery
+    const postRecoveryDiagnostics = pool.getExtendedWorkerDiagnostics();
+    const postRecoveryWorker = postRecoveryDiagnostics.find(w => w.workerId === quarantineTestWorker.id);
+    console.log('Worker state after recovery:');
+    console.log(`  Consecutive Failures: ${postRecoveryWorker?.consecutiveFailures ?? 0}`);
+    console.log(`  Quarantined: ${postRecoveryWorker?.quarantined ? 'YES' : 'NO'}`);
+    console.log(`  Health Status: ${postRecoveryWorker?.healthStatus ?? 'unknown'}`);
+    console.log(`  Recovery Attempts: ${postRecoveryWorker?.recoveryAttempts ?? 0}`);
+    console.log(`  Eligible: ${postRecoveryWorker?.skipReason ? 'NO (' + postRecoveryWorker.skipReason + ')' : 'YES'}`);
+    console.log();
+
+    // Record a success to ensure worker is fully recovered
+    pool.recordWorkerSuccess(quarantineTestWorker.id);
+    console.log('✓ Recorded success to reset failure count');
+    console.log();
+  }
+
+  // Display extended diagnostics for all workers
+  console.log('━'.repeat(60));
+  console.log('Extended Worker Diagnostics');
+  console.log('━'.repeat(60));
+  console.log();
+
+  const allExtendedDiagnostics = pool.getExtendedWorkerDiagnostics();
+  for (const diag of allExtendedDiagnostics) {
+    console.log(`Worker: ${diag.workerId} (${diag.workerType})`);
+    console.log(`  Status: ${diag.healthStatus}`);
+    console.log(`  Consecutive Failures: ${diag.consecutiveFailures}`);
+    console.log(`  Quarantined: ${diag.quarantined ? 'YES' : 'NO'}`);
+    if (diag.quarantinedUntil) {
+      console.log(`  Quarantined Until: ${new Date(diag.quarantinedUntil).toISOString()}`);
+    }
+    console.log(`  Recovery Attempts: ${diag.recoveryAttempts}`);
+    console.log(`  Eligible: ${diag.skipReason ? 'NO (' + diag.skipReason + ')' : 'YES'}`);
+    console.log();
+  }
 
   // Step 8: Final validation status
   console.log('━'.repeat(60));

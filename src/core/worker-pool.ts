@@ -31,7 +31,7 @@ export interface WorkerCapacity {
 /**
  * Worker health status
  */
-export type WorkerHealthStatus = 'online' | 'stale' | 'offline' | 'busy';
+export type WorkerHealthStatus = 'online' | 'stale' | 'offline' | 'busy' | 'quarantined';
 
 /**
  * Worker runtime metrics
@@ -55,6 +55,16 @@ export interface WorkerMetrics {
   healthStatus: WorkerHealthStatus;
   /** Heartbeat age in ms */
   heartbeatAgeMs: number;
+  /** Consecutive failures */
+  consecutiveFailures: number;
+  /** Last failure timestamp */
+  lastFailureAt: number | null;
+  /** Quarantined until timestamp */
+  quarantinedUntil: number | null;
+  /** Recovery attempts */
+  recoveryAttempts: number;
+  /** Last recovery timestamp */
+  lastRecoveryAt: number | null;
 }
 
 /**
@@ -102,6 +112,26 @@ export interface WorkerPoolConfig {
   pollIntervalMs: number;
   /** Enable load balancing */
   enableLoadBalancing: boolean;
+  /** Worker recovery policy */
+  recoveryPolicy?: WorkerRecoveryPolicy;
+}
+
+/**
+ * Worker recovery policy
+ */
+export interface WorkerRecoveryPolicy {
+  /** Maximum consecutive failures before quarantine */
+  maxConsecutiveFailures: number;
+  /** Grace period for stale workers before quarantine (ms) */
+  staleGraceMs: number;
+  /** Grace period for offline workers before quarantine (ms) */
+  offlineGraceMs: number;
+  /** Quarantine duration (ms) */
+  quarantineMs: number;
+  /** Whether heartbeat is required for recovery */
+  recoveryHeartbeatRequired: boolean;
+  /** Whether to allow auto-recovery */
+  allowAutoRecovery: boolean;
 }
 
 /**
@@ -159,6 +189,11 @@ export class WorkerPool {
         lastHeartbeatAt: null,
         healthStatus: 'online',
         heartbeatAgeMs: 0,
+        consecutiveFailures: 0,
+        lastFailureAt: null,
+        quarantinedUntil: null,
+        recoveryAttempts: 0,
+        lastRecoveryAt: null,
       },
       activeJobs: new Map(),
       isRunning: false,
@@ -198,6 +233,11 @@ export class WorkerPool {
         lastHeartbeatAt: null,
         healthStatus: 'online',
         heartbeatAgeMs: 0,
+        consecutiveFailures: 0,
+        lastFailureAt: null,
+        quarantinedUntil: null,
+        recoveryAttempts: 0,
+        lastRecoveryAt: null,
       },
       activeJobs: new Map(),
       isRunning: false,
@@ -655,6 +695,151 @@ export class WorkerPool {
     }
 
     return diagnostics;
+  }
+
+  /**
+   * Record a worker failure
+   */
+  recordWorkerFailure(workerId: string): void {
+    const worker = this._workers.get(workerId);
+    if (!worker) return;
+
+    worker.metrics.consecutiveFailures++;
+    worker.metrics.lastFailureAt = Date.now();
+
+    // Check if worker should be quarantined
+    const policy = this._config.recoveryPolicy;
+    if (policy && worker.metrics.consecutiveFailures >= policy.maxConsecutiveFailures) {
+      this.quarantineWorker(workerId, 'max_consecutive_failures');
+    }
+  }
+
+  /**
+   * Record a worker success (resets consecutive failures)
+   */
+  recordWorkerSuccess(workerId: string): void {
+    const worker = this._workers.get(workerId);
+    if (!worker) return;
+
+    worker.metrics.consecutiveFailures = 0;
+    worker.metrics.lastFailureAt = null;
+  }
+
+  /**
+   * Quarantine a worker
+   */
+  quarantineWorker(workerId: string, reason: string): void {
+    const worker = this._workers.get(workerId);
+    if (!worker) return;
+
+    const policy = this._config.recoveryPolicy;
+    if (!policy) return;
+
+    worker.metrics.quarantinedUntil = Date.now() + policy.quarantineMs;
+    worker.metrics.healthStatus = 'quarantined' as WorkerHealthStatus;
+  }
+
+  /**
+   * Attempt to recover a quarantined worker
+   */
+  async attemptWorkerRecovery(workerId: string): Promise<boolean> {
+    const worker = this._workers.get(workerId);
+    if (!worker) return false;
+
+    const policy = this._config.recoveryPolicy;
+    if (!policy || !policy.allowAutoRecovery) return false;
+
+    // Check if quarantine has expired
+    if (worker.metrics.quarantinedUntil && Date.now() < worker.metrics.quarantinedUntil) {
+      return false; // Still quarantined
+    }
+
+    // Check if heartbeat is required
+    if (policy.recoveryHeartbeatRequired) {
+      const now = Date.now();
+      if (!worker.metrics.lastHeartbeatAt || (now - worker.metrics.lastHeartbeatAt) > 5000) {
+        return false; // No recent heartbeat
+      }
+    }
+
+    // Recover the worker
+    worker.metrics.quarantinedUntil = null;
+    worker.metrics.consecutiveFailures = 0;
+    worker.metrics.lastFailureAt = null;
+    worker.metrics.recoveryAttempts++;
+    worker.metrics.lastRecoveryAt = Date.now();
+    worker.metrics.healthStatus = 'online';
+
+    return true;
+  }
+
+  /**
+   * Check if a worker is eligible for claiming
+   */
+  isWorkerEligible(workerId: string): { eligible: boolean; skipReason?: string } {
+    const worker = this._workers.get(workerId);
+    if (!worker) {
+      return { eligible: false, skipReason: 'Worker not found' };
+    }
+
+    // Check quarantine
+    if (worker.metrics.quarantinedUntil && Date.now() < worker.metrics.quarantinedUntil) {
+      return { eligible: false, skipReason: 'Quarantined' };
+    }
+
+    // Check health status
+    const policy = this._config.recoveryPolicy;
+    const now = Date.now();
+
+    if (worker.metrics.healthStatus === 'offline') {
+      return { eligible: false, skipReason: 'Offline' };
+    }
+
+    if (worker.metrics.healthStatus === 'stale' && policy) {
+      const staleDuration = worker.metrics.heartbeatAgeMs;
+      if (staleDuration > policy.staleGraceMs) {
+        return { eligible: false, skipReason: 'Stale beyond grace period' };
+      }
+    }
+
+    // Check capacity
+    if (worker.activeJobs.size >= worker.capacity.maxConcurrentJobs) {
+      return { eligible: false, skipReason: 'Saturated' };
+    }
+
+    return { eligible: true };
+  }
+
+  /**
+   * Get extended worker diagnostics including quarantine/recovery info
+   */
+  getExtendedWorkerDiagnostics(): Array<{
+    workerId: string;
+    workerType: string;
+    healthStatus: WorkerHealthStatus;
+    consecutiveFailures: number;
+    lastFailureAt: number | null;
+    quarantined: boolean;
+    quarantinedUntil: number | null;
+    recoveryAttempts: number;
+    lastRecoveryAt: number | null;
+    skipReason?: string;
+  }> {
+    return Array.from(this._workers.values()).map(worker => {
+      const eligibility = this.isWorkerEligible(worker.id);
+      return {
+        workerId: worker.id,
+        workerType: worker.workerType ?? 'generic',
+        healthStatus: worker.metrics.healthStatus,
+        consecutiveFailures: worker.metrics.consecutiveFailures,
+        lastFailureAt: worker.metrics.lastFailureAt,
+        quarantined: worker.metrics.quarantinedUntil !== null && Date.now() < worker.metrics.quarantinedUntil,
+        quarantinedUntil: worker.metrics.quarantinedUntil,
+        recoveryAttempts: worker.metrics.recoveryAttempts,
+        lastRecoveryAt: worker.metrics.lastRecoveryAt,
+        skipReason: eligibility.eligible ? undefined : eligibility.skipReason,
+      };
+    });
   }
 }
 
