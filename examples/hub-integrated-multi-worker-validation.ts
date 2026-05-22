@@ -700,6 +700,43 @@ async function main(): Promise<void> {
     console.log();
   }
 
+  // Step 7d: Hub-Aware Health Synchronization
+  console.log('━'.repeat(60));
+  console.log('Step 7d: Hub-Aware Health Synchronization');
+  console.log('━'.repeat(60));
+  console.log();
+
+  console.log('Comparing runtime health with hub eligibility...');
+  console.log();
+
+  const syncDiagnostics = await pool.getSynchronizedHealthDiagnostics();
+  let mismatchCount = 0;
+
+  for (const sync of syncDiagnostics) {
+    console.log(`Worker: ${sync.workerId} (${sync.workerType})`);
+    console.log(`  Runtime Status: ${sync.runtimeStatus}`);
+    console.log(`  Hub Status: ${sync.hubStatus}`);
+    console.log(`  Hub Eligible: ${sync.hubEligible ? 'YES' : 'NO'}`);
+    console.log(`  Heartbeat Age: ${sync.heartbeatAgeMs}ms`);
+    if (sync.hubRejectionReasons.length > 0) {
+      console.log(`  Hub Rejection Reasons: ${sync.hubRejectionReasons.join(', ')}`);
+    }
+    if (sync.mismatch) {
+      console.log(`  ⚠ MISMATCH: ${sync.mismatchReason}`);
+      mismatchCount++;
+    } else {
+      console.log(`  ✓ No mismatch`);
+    }
+    console.log();
+  }
+
+  if (mismatchCount === 0) {
+    console.log('✅ All workers synchronized - no mismatches detected');
+  } else {
+    console.log(`⚠ ${mismatchCount} worker(s) have health mismatches`);
+  }
+  console.log();
+
   // Step 8: Final validation status
   console.log('━'.repeat(60));
   console.log('Step 8: Final Validation Status');

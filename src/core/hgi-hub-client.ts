@@ -441,6 +441,95 @@ export class HGIHubClient {
   }
 
   /**
+   * Get worker health debug information from hub
+   *
+   * Endpoint: GET /handoff/claimable/debug?workerId=...
+   *
+   * Returns hub's view of worker eligibility and rejection reasons.
+   */
+  async getWorkerHealthDebug(workerId: string): Promise<{
+    workerId: string;
+    workerFound: boolean;
+    workerDebug?: {
+      workerId: string;
+      status: string;
+      capabilities: string[];
+      lastHeartbeatAt: string;
+      heartbeatAgeMs: number;
+      isStale: boolean;
+      workerType: string;
+    };
+    totalQueuedHandoffs: number;
+    eligibleCount: number;
+    rejectedCount: number;
+    handoffs?: Array<{
+      handoffId: string;
+      requestId: string;
+      status: string;
+      requiredCapability: string;
+      eligible: boolean;
+      rejectionReasons: string[];
+    }>;
+  }> {
+    try {
+      const response = await this._fetch(`/handoff/claimable/debug?workerId=${encodeURIComponent(workerId)}`, { method: 'GET' });
+
+      if (response.status === 404) {
+        return {
+          workerId,
+          workerFound: false,
+          totalQueuedHandoffs: 0,
+          eligibleCount: 0,
+          rejectedCount: 0,
+        };
+      }
+
+      if (!response.ok) {
+        throw new HGIHubError(
+          `Worker health debug failed: ${response.status} ${response.statusText}`,
+          this._statusToErrorType(response.status),
+          response.status
+        );
+      }
+
+      return await response.json() as {
+        workerId: string;
+        workerFound: boolean;
+        workerDebug?: {
+          workerId: string;
+          status: string;
+          capabilities: string[];
+          lastHeartbeatAt: string;
+          heartbeatAgeMs: number;
+          isStale: boolean;
+          workerType: string;
+        };
+        totalQueuedHandoffs: number;
+        eligibleCount: number;
+        rejectedCount: number;
+        handoffs?: Array<{
+          handoffId: string;
+          requestId: string;
+          status: string;
+          requiredCapability: string;
+          eligible: boolean;
+          rejectionReasons: string[];
+        }>;
+      };
+    } catch (error) {
+      if (error instanceof HGIHubError) {
+        throw error;
+      }
+      throw new HGIHubError(
+        `Worker health debug failed: ${error instanceof Error ? error.message : String(error)}`,
+        'network',
+        undefined,
+        error instanceof Error ? error : undefined
+      );
+    }
+  }
+
+  /**
    * Claim a handoff for processing
    *
    * Endpoint: POST /handoff/:id/claim

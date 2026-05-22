@@ -586,6 +586,76 @@ export class WorkerPool {
       failedJobs: worker.metrics.failedJobs,
     }));
   }
+
+  /**
+   * Get synchronized health diagnostics comparing runtime and hub
+   */
+  async getSynchronizedHealthDiagnostics(): Promise<Array<{
+    workerId: string;
+    workerType: string;
+    runtimeStatus: WorkerHealthStatus;
+    hubStatus: string;
+    hubEligible: boolean;
+    heartbeatAgeMs: number;
+    hubRejectionReasons: string[];
+    mismatch: boolean;
+    mismatchReason: string;
+  }>> {
+    const diagnostics: Array<{
+      workerId: string;
+      workerType: string;
+      runtimeStatus: WorkerHealthStatus;
+      hubStatus: string;
+      hubEligible: boolean;
+      heartbeatAgeMs: number;
+      hubRejectionReasons: string[];
+      mismatch: boolean;
+      mismatchReason: string;
+    }> = [];
+
+    for (const worker of this._workers.values()) {
+      const hubDebug = await worker.hubClient.getWorkerHealthDebug(worker.id);
+      
+      const runtimeStatus = worker.metrics.healthStatus;
+      const hubStatus = hubDebug.workerDebug?.status ?? 'unknown';
+      const hubEligible = hubDebug.workerFound && (hubDebug.eligibleCount > 0 || hubDebug.totalQueuedHandoffs === 0);
+      const hubRejectionReasons = hubDebug.handoffs
+        ?.filter(h => !h.eligible)
+        .flatMap(h => h.rejectionReasons) ?? [];
+
+      // Detect mismatches
+      let mismatch = false;
+      let mismatchReason = '';
+
+      if (!hubDebug.workerFound) {
+        mismatch = true;
+        mismatchReason = 'Worker not found in hub';
+      } else if (runtimeStatus === 'online' && hubDebug.workerDebug?.isStale) {
+        mismatch = true;
+        mismatchReason = 'Runtime says online but hub says stale';
+      } else if (runtimeStatus === 'stale' && !hubDebug.workerDebug?.isStale && hubDebug.workerDebug?.status === 'online') {
+        mismatch = true;
+        mismatchReason = 'Runtime says stale but hub says online';
+      } else if (runtimeStatus === 'offline' && hubEligible) {
+        mismatch = true;
+        mismatchReason = 'Runtime says offline but hub still allows claimables';
+      }
+
+      diagnostics.push({
+        workerId: worker.id,
+        workerType: worker.workerType ?? 'generic',
+        runtimeStatus,
+        hubStatus,
+        hubEligible,
+        heartbeatAgeMs: worker.metrics.heartbeatAgeMs,
+        hubRejectionReasons,
+        mismatch,
+        mismatchReason,
+      });
+    }
+
+    return diagnostics;
+  }
 }
 
 /**
