@@ -562,6 +562,144 @@ async function main(): Promise<void> {
   }
   console.log();
 
+  // Step 7c: Worker Health Validation
+  console.log('━'.repeat(60));
+  console.log('Step 7c: Worker Health Validation');
+  console.log('━'.repeat(60));
+  console.log();
+
+  console.log('Testing worker heartbeat expiration and recovery...');
+  console.log();
+
+  // Select one worker to test stale behavior (EVA worker)
+  const testWorker = pool.workers.find(w => w.workerType === 'eva');
+  if (!testWorker) {
+    console.log('⚠ No EVA worker found for health test, skipping');
+  } else {
+    console.log(`Selected worker for health test: ${testWorker.id} (${testWorker.workerType})`);
+    console.log();
+
+    // Update health status
+    pool.updateWorkerHealth(testWorker.id, Date.now());
+    const initialHealth = pool.getWorkerHealthDiagnostics().find(w => w.workerId === testWorker.id);
+    console.log('Initial health state:');
+    console.log(`  Status: ${initialHealth?.healthStatus ?? 'unknown'}`);
+    console.log(`  Heartbeat age: ${initialHealth?.heartbeatAgeMs ?? 0}ms`);
+    console.log();
+
+    // Submit a new EVA handoff
+    console.log('Submitting new EVA handoff...');
+    const newHandoff = await hubClient.submitHandoff({
+      requestId: `req-health-test-${Date.now()}`,
+      sourceRuntimeId: 'hub-integrated-validation',
+      localModel: { modelId: 'placeholder' },
+      originalRequest: { model: 'placeholder', input: 'Health test input' },
+      handoffSignal: {
+        type: 'HANDOFF_REQUIRED',
+        severity: 'critical',
+        reason: 'eva',
+        metrics: { timestamp: new Date().toISOString() },
+        suggestedTarget: 'node',
+        timestamp: new Date().toISOString(),
+        mandatory: true,
+        crossedThresholds: [],
+      },
+      metrics: { timestamp: new Date().toISOString() },
+      requestedCapability: 'eva' as 'llm' | 'eva' | 'stt' | 'tts' | 'vision' | 'emergency' | 'text-generation',
+      createdAt: new Date().toISOString(),
+      priority: 50,
+    });
+    console.log(`✓ Handoff created: ${newHandoff.handoffId}`);
+    console.log();
+
+    // Check if worker can claim it (should be able initially)
+    console.log('Checking claimable before heartbeat stop...');
+    await hubClient.sendWorkerHeartbeat(testWorker.id, 'online');
+    pool.updateWorkerHealth(testWorker.id, Date.now());
+    const claimableBefore = await hubClient.getClaimableHandoffs(testWorker.id);
+    console.log(`  Claimable count: ${claimableBefore.length}`);
+    console.log(`  Can claim: ${claimableBefore.some(h => h.id === newHandoff.handoffId) ? 'YES' : 'NO'}`);
+    console.log();
+
+    // Stop heartbeat for this worker (simulate failure)
+    console.log('Stopping heartbeat for worker (simulating failure)...');
+    console.log('Waiting 35 seconds for worker to become stale...');
+    console.log();
+    await new Promise(resolve => setTimeout(resolve, 35000));
+
+    // Update health to simulate stale state
+    pool.updateWorkerHealth(testWorker.id, Date.now() - 35000);
+    const staleHealth = pool.getWorkerHealthDiagnostics().find(w => w.workerId === testWorker.id);
+    console.log('Health state after heartbeat stop:');
+    console.log(`  Status: ${staleHealth?.healthStatus ?? 'unknown'}`);
+    console.log(`  Heartbeat age: ${staleHealth?.heartbeatAgeMs ?? 0}ms`);
+    console.log();
+
+    // Check if worker can still claim (should be rejected by hub)
+    console.log('Checking claimable after heartbeat stop...');
+    try {
+      const claimableAfter = await hubClient.getClaimableHandoffs(testWorker.id);
+      console.log(`  Claimable count: ${claimableAfter.length}`);
+      console.log(`  Can claim: ${claimableAfter.some(h => h.id === newHandoff.handoffId) ? 'YES' : 'NO'}`);
+    } catch (error) {
+      console.log(`  Error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    console.log();
+
+    // Restart heartbeat (simulate recovery)
+    console.log('Restarting heartbeat (simulating recovery)...');
+    await hubClient.sendWorkerHeartbeat(testWorker.id, 'online');
+    pool.updateWorkerHealth(testWorker.id, Date.now());
+    const recoveredHealth = pool.getWorkerHealthDiagnostics().find(w => w.workerId === testWorker.id);
+    console.log('Health state after recovery:');
+    console.log(`  Status: ${recoveredHealth?.healthStatus ?? 'unknown'}`);
+    console.log(`  Heartbeat age: ${recoveredHealth?.heartbeatAgeMs ?? 0}ms`);
+    console.log();
+
+    // Check if worker can claim again (should be able)
+    console.log('Checking claimable after recovery...');
+    const claimableRecovered = await hubClient.getClaimableHandoffs(testWorker.id);
+    console.log(`  Claimable count: ${claimableRecovered.length}`);
+    console.log(`  Can claim: ${claimableRecovered.some(h => h.id === newHandoff.handoffId) ? 'YES' : 'NO'}`);
+    console.log();
+
+    // Claim and complete the handoff
+    if (claimableRecovered.some(h => h.id === newHandoff.handoffId) && newHandoff.handoffId) {
+      console.log('Claiming and completing handoff...');
+      try {
+        await hubClient.claimHandoff(newHandoff.handoffId, testWorker.id);
+        await hubClient.completeHandoff(newHandoff.handoffId, {
+          text: 'Health test completed',
+          model: 'eva',
+          workerId: testWorker.id,
+          metrics: { processingTimeMs: 100 },
+        });
+        console.log('✓ Handoff claimed and completed');
+      } catch (error) {
+        console.log(`⚠ Could not complete: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    console.log();
+  }
+
+  // Display health diagnostics for all workers
+  console.log('━'.repeat(60));
+  console.log('Worker Health Diagnostics');
+  console.log('━'.repeat(60));
+  console.log();
+
+  const healthDiagnostics = pool.getWorkerHealthDiagnostics();
+  for (const health of healthDiagnostics) {
+    console.log(`Worker: ${health.workerId} (${health.workerType})`);
+    console.log(`  Status: ${health.healthStatus}`);
+    console.log(`  Last heartbeat: ${health.lastHeartbeatAt ? new Date(health.lastHeartbeatAt).toISOString() : 'never'}`);
+    console.log(`  Heartbeat age: ${health.heartbeatAgeMs}ms`);
+    console.log(`  Active jobs: ${health.activeJobs}`);
+    console.log(`  Completed: ${health.completedJobs}`);
+    console.log(`  Failed: ${health.failedJobs}`);
+    console.log();
+  }
+
   // Step 8: Final validation status
   console.log('━'.repeat(60));
   console.log('Step 8: Final Validation Status');

@@ -29,6 +29,11 @@ export interface WorkerCapacity {
 }
 
 /**
+ * Worker health status
+ */
+export type WorkerHealthStatus = 'online' | 'stale' | 'offline' | 'busy';
+
+/**
  * Worker runtime metrics
  */
 export interface WorkerMetrics {
@@ -44,6 +49,12 @@ export interface WorkerMetrics {
   utilizationPercent: number;
   /** Total processing time accumulated */
   totalProcessingTimeMs: number;
+  /** Last heartbeat timestamp */
+  lastHeartbeatAt: number | null;
+  /** Current health status */
+  healthStatus: WorkerHealthStatus;
+  /** Heartbeat age in ms */
+  heartbeatAgeMs: number;
 }
 
 /**
@@ -145,6 +156,9 @@ export class WorkerPool {
         lastActivityAt: null,
         utilizationPercent: 0,
         totalProcessingTimeMs: 0,
+        lastHeartbeatAt: null,
+        healthStatus: 'online',
+        heartbeatAgeMs: 0,
       },
       activeJobs: new Map(),
       isRunning: false,
@@ -181,6 +195,9 @@ export class WorkerPool {
         lastActivityAt: null,
         utilizationPercent: 0,
         totalProcessingTimeMs: 0,
+        lastHeartbeatAt: null,
+        healthStatus: 'online',
+        heartbeatAgeMs: 0,
       },
       activeJobs: new Map(),
       isRunning: false,
@@ -520,6 +537,54 @@ export class WorkerPool {
    */
   get workers(): PoolWorker[] {
     return Array.from(this._workers.values());
+  }
+
+  /**
+   * Update worker health status based on heartbeat
+   */
+  updateWorkerHealth(workerId: string, heartbeatTimestamp: number): void {
+    const worker = this._workers.get(workerId);
+    if (!worker) return;
+
+    worker.metrics.lastHeartbeatAt = heartbeatTimestamp;
+    const now = Date.now();
+    worker.metrics.heartbeatAgeMs = now - heartbeatTimestamp;
+
+    // Determine health status based on heartbeat age
+    if (worker.activeJobs.size > 0) {
+      worker.metrics.healthStatus = 'busy';
+    } else if (worker.metrics.heartbeatAgeMs > 60000) {
+      worker.metrics.healthStatus = 'offline';
+    } else if (worker.metrics.heartbeatAgeMs > 30000) {
+      worker.metrics.healthStatus = 'stale';
+    } else {
+      worker.metrics.healthStatus = 'online';
+    }
+  }
+
+  /**
+   * Get worker health diagnostics
+   */
+  getWorkerHealthDiagnostics(): Array<{
+    workerId: string;
+    workerType: string;
+    lastHeartbeatAt: number | null;
+    heartbeatAgeMs: number;
+    healthStatus: WorkerHealthStatus;
+    activeJobs: number;
+    completedJobs: number;
+    failedJobs: number;
+  }> {
+    return Array.from(this._workers.values()).map(worker => ({
+      workerId: worker.id,
+      workerType: worker.workerType ?? 'generic',
+      lastHeartbeatAt: worker.metrics.lastHeartbeatAt,
+      heartbeatAgeMs: worker.metrics.heartbeatAgeMs,
+      healthStatus: worker.metrics.healthStatus,
+      activeJobs: worker.activeJobs.size,
+      completedJobs: worker.metrics.completedJobs,
+      failedJobs: worker.metrics.failedJobs,
+    }));
   }
 }
 
