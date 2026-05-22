@@ -31,6 +31,10 @@ import {
   createProcessor,
   type ProcessorRequest,
 } from '../src/core/worker-processors.js';
+import {
+  generateRuntimeHealthSnapshot,
+  formatRuntimeHealthSnapshot,
+} from '../src/core/runtime-health-snapshot.js';
 import type { HGIHubHandoffResponse } from '../src/types/hub-handoff.js';
 import type { WorkerType } from '../src/types/worker-capability.js';
 
@@ -859,6 +863,22 @@ async function main(): Promise<void> {
   console.log();
   console.log(`Routing Accuracy: ${routingAccuracy.toFixed(1)}% (required: 80%)`);
   console.log(`Success Rate: ${successRate.toFixed(1)}% (required: 80%)`);
+  console.log();
+
+  // Step 9: Final Runtime Health Snapshot
+  console.log('━'.repeat(60));
+  console.log('Step 9: Final Runtime Health Snapshot');
+  console.log('━'.repeat(60));
+  console.log();
+
+  const finalSnapshot = await generateRuntimeHealthSnapshot({
+    runtimeId: 'hub-integrated-validation',
+    hubUrl: HUB_URL,
+    pool,
+    hubClient,
+  });
+
+  console.log(formatRuntimeHealthSnapshot(finalSnapshot));
   console.log();
 
   // Cleanup

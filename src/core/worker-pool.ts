@@ -139,6 +139,7 @@ export interface WorkerRecoveryPolicy {
  */
 export interface WorkerLoadInfo {
   workerId: string;
+  workerType?: string;
   activeJobs: number;
   maxJobs: number;
   availableSlots: number;

@@ -217,8 +217,8 @@ npm run example:hub-integrated-multi-worker
 ## Commit & Push
 
 **Commit Message**: `feat: add worker auto recovery quarantine policy`  
-**Commit Hash**: TBD  
-**Push Result**: TBD
+**Commit Hash**: 73db222  
+**Push Result**: ✅ Success
 
 ---
 
