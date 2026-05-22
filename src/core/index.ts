@@ -14,6 +14,12 @@ export {
   type RuntimeHealthSnapshot,
 } from './runtime-health-snapshot.js';
 export {
+  RuntimeSupervisor,
+  createRuntimeSupervisor,
+  type RuntimeSupervisorConfig,
+  type SupervisorWarning,
+} from './runtime-supervisor.js';
+export {
   buildWorkerContract,
   buildWorkerRegistration,
   createLLMWorker,

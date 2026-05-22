@@ -19,6 +19,7 @@
     "example:multi-worker": "node dist/examples/real-multi-worker-pool-demo.js",
     "example:hub-integrated-multi-worker": "node dist/examples/hub-integrated-multi-worker-validation.js",
     "example:runtime-health-snapshot": "node dist/examples/runtime-health-snapshot.js",
+    "example:runtime-supervisor-demo": "node dist/examples/runtime-supervisor-demo.js",
     "worker:llama": "node dist/examples/llama-handoff-worker.js",
     "lint": "eslint src tests examples adapters --ext .ts",
     "lint:fix": "eslint src tests examples adapters --ext .ts --fix",

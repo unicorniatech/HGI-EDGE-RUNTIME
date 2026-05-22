@@ -35,6 +35,7 @@ import {
   generateRuntimeHealthSnapshot,
   formatRuntimeHealthSnapshot,
 } from '../src/core/runtime-health-snapshot.js';
+import { createRuntimeSupervisor } from '../src/core/runtime-supervisor.js';
 import type { HGIHubHandoffResponse } from '../src/types/hub-handoff.js';
 import type { WorkerType } from '../src/types/worker-capability.js';
 
@@ -879,6 +880,38 @@ async function main(): Promise<void> {
   });
 
   console.log(formatRuntimeHealthSnapshot(finalSnapshot));
+  console.log();
+
+  // Step 10: Brief Supervisor Run
+  console.log('━'.repeat(60));
+  console.log('Step 10: Brief Supervisor Run');
+  console.log('━'.repeat(60));
+  console.log();
+
+  console.log('Running supervisor for one tick...');
+  const supervisor = createRuntimeSupervisor({
+    runtimeId: 'hub-integrated-validation',
+    hubUrl: HUB_URL,
+    pool,
+    hubClient,
+    intervalMs: 1000,
+    emitTextSnapshot: false,
+    emitJsonSnapshot: false,
+    stopOnCriticalMismatch: false,
+    maxWarnings: 50,
+  });
+
+  supervisor.start();
+  await new Promise(resolve => setTimeout(resolve, 1500)); // Wait for one tick
+  supervisor.stop();
+
+  const supervisorWarnings = supervisor.getWarnings();
+  console.log(`✓ Supervisor ran 1 tick, collected ${supervisorWarnings.length} warnings`);
+  if (supervisorWarnings.length > 0) {
+    supervisorWarnings.forEach(w => {
+      console.log(`  [${w.severity.toUpperCase()}] ${w.message}`);
+    });
+  }
   console.log();
 
   // Cleanup
