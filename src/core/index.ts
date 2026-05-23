@@ -20,6 +20,15 @@ export {
   type SupervisorWarning,
 } from './runtime-supervisor.js';
 export {
+  RuntimeJournal,
+  createRuntimeJournal,
+  readRuntimeJournal,
+  type RuntimeJournalConfig,
+  type RuntimeJournalEvent,
+  type RuntimeJournalEventType,
+  type RuntimeJournalReaderOptions,
+} from './runtime-journal.js';
+export {
   buildWorkerContract,
   buildWorkerRegistration,
   createLLMWorker,

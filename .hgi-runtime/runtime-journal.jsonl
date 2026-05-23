@@ -1,0 +1,3 @@
+{"id":"evt-1779494601520-1","timestamp":"2026-05-23T00:03:21.520Z","runtimeId":"runtime-journal-demo","eventType":"supervisor_started","severity":"info","message":"Supervisor started"}
+{"id":"evt-1779494607531-2","timestamp":"2026-05-23T00:03:27.531Z","runtimeId":"runtime-journal-demo","eventType":"supervisor_stopped","severity":"info","message":"Supervisor stopped after 3 ticks"}
+{"id":"evt-1779494607532-3","timestamp":"2026-05-23T00:03:27.532Z","runtimeId":"runtime-journal-demo","eventType":"lifecycle_summary","severity":"info","message":"Supervisor lifecycle summary","metadata":{"totalTicks":3,"totalWorkers":0,"totalWarnings":0,"hubReachable":true,"completedJobs":0,"failedJobs":0}}

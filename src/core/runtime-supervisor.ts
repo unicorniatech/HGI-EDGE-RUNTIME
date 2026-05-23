@@ -15,6 +15,12 @@ import {
   formatRuntimeHealthSnapshotJSON,
   type RuntimeHealthSnapshot,
 } from './runtime-health-snapshot.js';
+import {
+  RuntimeJournal,
+  createRuntimeJournal,
+  type RuntimeJournalConfig,
+  type RuntimeJournalEventType,
+} from './runtime-journal.js';
 
 /**
  * Supervisor configuration
@@ -38,6 +44,8 @@ export interface RuntimeSupervisorConfig {
   stopOnCriticalMismatch: boolean;
   /** Maximum warnings to store */
   maxWarnings: number;
+  /** Journal configuration */
+  journal?: RuntimeJournalConfig;
 }
 
 /**
@@ -61,6 +69,8 @@ export class RuntimeSupervisor {
   private _lastSnapshot: RuntimeHealthSnapshot | null = null;
   private _warnings: SupervisorWarning[] = [];
   private _previousFailedJobs = 0;
+  private _journal: RuntimeJournal | null = null;
+  private _previousHubReachable = true;
 
   constructor(config: RuntimeSupervisorConfig) {
     this._config = {
@@ -71,6 +81,11 @@ export class RuntimeSupervisor {
       stopOnCriticalMismatch: config.stopOnCriticalMismatch ?? false,
       maxWarnings: config.maxWarnings ?? 100,
     };
+
+    // Initialize journal if configured
+    if (this._config.journal && this._config.journal.enabled) {
+      this._journal = createRuntimeJournal(this._config.journal);
+    }
   }
 
   /**
@@ -85,10 +100,14 @@ export class RuntimeSupervisor {
     this._tick = 0;
     this._warnings = [];
     this._previousFailedJobs = 0;
+    this._previousHubReachable = true;
 
     console.log(`[Supervisor] Starting with interval ${this._config.intervalMs}ms`);
     console.log(`[Supervisor] Runtime ID: ${this._config.runtimeId}`);
     console.log();
+
+    // Write journal event
+    this.writeJournalEvent('supervisor_started', 'info', 'Supervisor started');
 
     // Run first tick immediately
     this.runTick();
@@ -116,6 +135,21 @@ export class RuntimeSupervisor {
 
     this._running = false;
     console.log(`[Supervisor] Stopped`);
+
+    // Write journal event
+    this.writeJournalEvent('supervisor_stopped', 'info', `Supervisor stopped after ${this._tick} ticks`);
+
+    // Write lifecycle summary to journal
+    if (this._lastSnapshot) {
+      this.writeJournalEvent('lifecycle_summary', 'info', 'Supervisor lifecycle summary', undefined, undefined, {
+        totalTicks: this._tick,
+        totalWorkers: this._lastSnapshot.totalWorkers,
+        totalWarnings: this._warnings.length,
+        hubReachable: this._lastSnapshot.hubReachable,
+        completedJobs: this._lastSnapshot.completedJobs,
+        failedJobs: this._lastSnapshot.failedJobs,
+      });
+    }
   }
 
   /**
@@ -207,16 +241,36 @@ export class RuntimeSupervisor {
     // Hub unreachable
     if (!snapshot.hubReachable) {
       this.addWarning('error', 'Hub is not reachable');
+      if (this._previousHubReachable) {
+        this.writeJournalEvent('hub_unreachable', 'error', 'Hub became unreachable');
+      }
+      this._previousHubReachable = false;
+    } else if (!this._previousHubReachable) {
+      this.writeJournalEvent('hub_recovered', 'info', 'Hub recovered');
+      this._previousHubReachable = true;
     }
 
     // Quarantined workers
     if (snapshot.quarantinedWorkers.length > 0) {
       this.addWarning('warning', `${snapshot.quarantinedWorkers.length} worker(s) quarantined`);
+      snapshot.quarantinedWorkers.forEach(w => {
+        this.writeJournalEvent('worker_quarantined', 'warning', `Worker quarantined: ${w.workerId}`, w.workerId, w.workerType, {
+          consecutiveFailures: w.consecutiveFailures,
+          quarantinedUntil: w.quarantinedUntil,
+        });
+      });
     }
 
     // Health mismatches
     if (snapshot.healthMismatches.length > 0) {
       this.addWarning('warning', `${snapshot.healthMismatches.length} worker(s) have health mismatches with hub`);
+      snapshot.healthMismatches.forEach(m => {
+        this.writeJournalEvent('worker_health_changed', 'warning', `Health mismatch: ${m.workerId}`, m.workerId, m.workerType, {
+          runtimeStatus: m.runtimeStatus,
+          hubStatus: m.hubStatus,
+          mismatchReason: m.mismatchReason,
+        });
+      });
     }
 
     // Failed jobs increased
@@ -261,6 +315,34 @@ export class RuntimeSupervisor {
     if (this._warnings.length > this._config.maxWarnings) {
       this._warnings = this._warnings.slice(-this._config.maxWarnings);
     }
+
+    // Write to journal
+    this.writeJournalEvent('warning', severity, message);
+  }
+
+  /**
+   * Write a journal event
+   */
+  private writeJournalEvent(
+    eventType: RuntimeJournalEventType,
+    severity: 'info' | 'warning' | 'error',
+    message: string,
+    workerId?: string,
+    workerType?: string,
+    metadata?: Record<string, unknown>
+  ): void {
+    if (!this._journal) return;
+
+    this._journal.writeEvent({
+      timestamp: new Date().toISOString(),
+      runtimeId: this._config.runtimeId,
+      eventType,
+      severity,
+      workerId,
+      workerType,
+      message,
+      metadata,
+    });
   }
 }
 
